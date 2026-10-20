@@ -3,6 +3,7 @@ import SwiftUI
 /// Unictrl Settings on one page, most used first: the screens, the PCs, then options.
 struct SettingsView: View {
     @ObservedObject var controller: AppController
+    @ObservedObject private var updater = AppUpdater.shared
     @State private var removing: AppController.Device?
     /// The screen being renamed ("mac" or a PC's ID) and the text in the field.
     @State private var renaming: String?
@@ -92,6 +93,14 @@ struct SettingsView: View {
                 Text("Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Files are not included.").font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("Software updates") {
+                Toggle("Check and download updates automatically", isOn: $updater.automatic)
+                Text(updater.status).font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Check for updates") { updater.check() }.disabled(updater.busy)
+                    if updater.preparedVersion != nil { Button("Restart and update") { updater.install() } }
+                }
+            }
             Section("General") {
                 Toggle("Share this Mac’s keyboard and mouse", isOn: $controller.enabled)
                 Picker(selection: $controller.shareChannel) {

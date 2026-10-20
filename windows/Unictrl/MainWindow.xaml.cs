@@ -14,6 +14,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly Settings settings = Settings.Load();
     private readonly ClipboardSync clipboard;
+    private readonly AppUpdater updater;
     private readonly Tray tray;
     private Receiver? receiver;
     private bool quitting;
@@ -23,6 +24,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        updater = new AppUpdater(settings, (text, ready) => DispatcherQueue.TryEnqueue(() => { UpdateStatus.Text = text; InstallUpdateButton.IsEnabled = ready; }));
+        AutomaticUpdatesSwitch.IsOn = settings.AutomaticUpdates;
         clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text));
         ClipboardImagesSwitch.IsOn = settings.ClipboardImagesEnabled;
         ClipboardSwitch.IsOn = settings.ClipboardEnabled;
@@ -76,7 +79,7 @@ public sealed partial class MainWindow : Window
             if (settings.ShowInTaskbar && AppWindow.Presenter is OverlappedPresenter overlapped) overlapped.Minimize();
             else AppWindow.Hide();
         };
-        Closed += (_, _) => { receiver?.Dispose(); clipboard.Dispose(); tray.Dispose(); };
+        Closed += (_, _) => { receiver?.Dispose(); clipboard.Dispose(); updater.Dispose(); tray.Dispose(); };
 
         if (settings.Enabled) StartReceiver(); else SetStatus("Paused");
         Task.Run(() =>
@@ -173,6 +176,7 @@ public sealed partial class MainWindow : Window
     private void Quit()
     {
         quitting = true;
+        updater.Dispose();
         CursorHider.Show("quit");
         receiver?.Dispose();
         clipboard.Dispose();
@@ -215,6 +219,14 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private void OnAutomaticUpdatesToggled(object sender, RoutedEventArgs e)
+    {
+        if (settings.AutomaticUpdates == AutomaticUpdatesSwitch.IsOn) return;
+        settings.AutomaticUpdates = AutomaticUpdatesSwitch.IsOn; settings.Save();
+        if (settings.AutomaticUpdates) _ = updater.Check();
+    }
+    private void OnCheckUpdate(object sender, RoutedEventArgs e) => _ = updater.Check();
+    private void OnInstallUpdate(object sender, RoutedEventArgs e) => updater.Install(Quit);
     private void OnClipboardImagesToggled(object sender, RoutedEventArgs e)
     {
         if (settings.ClipboardImagesEnabled == ClipboardImagesSwitch.IsOn) return;

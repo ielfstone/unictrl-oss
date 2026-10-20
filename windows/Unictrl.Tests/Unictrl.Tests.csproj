@@ -9,6 +9,8 @@
     <RootNamespace>Unictrl.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Unictrl\UpdateProtocol.cs" Link="Linked\UpdateProtocol.cs" />
+    <None Include="..\..\tests\updates\*.json" LinkBase="updates" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\Unictrl\ClipboardProtocol.cs" Link="Linked\ClipboardProtocol.cs" />
     <Compile Include="..\Unictrl\Arrangement.cs" Link="Linked\Arrangement.cs" />
     <Compile Include="..\Unictrl\KeyTable.cs" Link="Linked\KeyTable.cs" />

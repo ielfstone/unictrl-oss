@@ -1,4 +1,4 @@
-Unictrl 0.3.0 — 双向文本和图片剪贴板（个人 Fork 测试版）
+Unictrl 0.4.0 — 双向文本和图片剪贴板（个人 Fork 测试版）
 
 完整解压后运行 Unictrl.exe，保留全部 DLL 与子目录。旧版升级请先退出旧程序，把原来的 Data 文件夹复制到新软件目录，配对即可保留。
 
@@ -9,4 +9,4 @@ Mac 配对多台 PC 时，请在 Windows PC 下拉框选定一台；只有一台
 
 仅提供复制内容的同步，粘贴快捷键仍沿用你当前的键盘布局。目标应用必须允许粘贴文本。
 这是本地 Fork 的版本，不是原作者的官方发行。基于 GPL-3.0，完整许可证和修改源码随包提供。
-源代码：https://github.com/ielfstone/unictrl-oss/tree/feature/clipboard-images
+源代码：https://github.com/ielfstone/unictrl-oss/tree/feature/auto-update

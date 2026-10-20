@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(reopen(_:reply:)),
                                                      forEventClass: AEEventClass(kCoreEventClass),
                                                      andEventID: AEEventID(kAEReopenApplication))
-        MainActor.assumeIsolated { AppController.shared.applyDockIcon() }
+        MainActor.assumeIsolated { AppController.shared.applyDockIcon(); AppUpdater.shared.start() }
         Log.write("app_delegate_ready")
     }
 

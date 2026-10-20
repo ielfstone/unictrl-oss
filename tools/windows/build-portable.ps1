@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'artifacts' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $stage = Join-Path $out ('windows-stage-' + [guid]::NewGuid().ToString('N'))
-$packageName = 'Unictrl-0.3.0-windows-x64-portable'
+$packageName = 'Unictrl-0.4.0-windows-x64-portable'
 $payload = Join-Path $stage $packageName
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 $project = Join-Path $repo 'windows/Unictrl/Unictrl.csproj'
@@ -61,6 +61,9 @@ $clipboardProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -
 if (-not $clipboardProcess.WaitForExit(40000)) { $clipboardProcess.Kill(); throw 'Clipboard native integration test timed out.' }
 if ($clipboardProcess.ExitCode -ne 0) { Get-Content $log; throw 'Clipboard native integration test failed.' }
 if (-not (Select-String -LiteralPath $log -Pattern 'clipboard_test passed' -Quiet)) { Get-Content $log; throw 'Clipboard integration success marker missing.' }
+$updateProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--update-test' -WorkingDirectory $payload -PassThru
+if (-not $updateProcess.WaitForExit(45000)) { $updateProcess.Kill(); throw 'Updater integration test timed out.' }
+if ($updateProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'update_test passed' -Quiet)) { Get-Content $log; throw 'Updater integration test failed.' }
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'
@@ -83,9 +86,9 @@ foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
 }
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $payload 'Source.zip')
 $buildInfo = [ordered]@{
-    version = '0.3.0'; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.4.0'; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
-    layoutVersion = 2; feature = 'bidirectional text and PNG clipboard v2'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
+    layoutVersion = 2; feature = 'text and PNG clipboard with signed automatic updates'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $buildInfo | ConvertTo-Json | Set-Content (Join-Path $payload 'BUILD-INFO.json') -Encoding utf8
 $zip = Join-Path $out ($packageName + '.zip')
@@ -101,3 +104,5 @@ try {
 $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath ($zip + '.sha256') -Encoding ascii
 Write-Host "Portable ZIP ready: $zip"
+Write-Host "UPDATE_ASSET_SHA256=$hash"
+Write-Host "UPDATE_ASSET_SIZE=$((Get-Item -LiteralPath $zip).Length)"
