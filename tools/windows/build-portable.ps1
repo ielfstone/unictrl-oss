@@ -67,6 +67,7 @@ if ($updateProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pat
 $fileProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--files-test' -WorkingDirectory $payload -PassThru
 if (-not $fileProcess.WaitForExit(120000)) { $fileProcess.Kill(); Get-Content $log; throw 'File native integration test timed out.' }
 if ($fileProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'files_test passed' -Quiet)) { Get-Content $log; throw 'File native integration test failed.' }
+Write-Host "FILE_TRANSFER_TEST=passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list"
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'

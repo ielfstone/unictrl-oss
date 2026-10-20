@@ -32,6 +32,18 @@ public sealed class FileTests
             inbox.End(0,f.Sha256);var files=inbox.Complete();Assert.Equal(data,File.ReadAllBytes(files[0]));Assert.Single(Directory.GetDirectories(root));
         }finally{Directory.Delete(root,true);}
     }
+    [Fact]public void EmptyFileAndCorruptedPayload()
+    {
+        var root=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString());
+        try
+        {
+            using(var inbox=new FileInbox(new(Guid.NewGuid().ToString(),"drop",[new(".part-0",0)]),root))
+            {inbox.Begin(0);inbox.End(0,Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Array.Empty<byte>())));Assert.Empty(File.ReadAllBytes(inbox.Complete()[0]));}
+            var fixture=Sample();using var bad=new FileInbox(fixture.Offer,root);bad.Begin(0);
+            for(long offset=0;offset<fixture.Offer.Size;offset+=FileProtocol.ChunkSize)bad.Append(0,offset,new byte[(int)Math.Min(FileProtocol.ChunkSize,fixture.Offer.Size-offset)]);
+            Assert.Throws<InvalidDataException>(()=>bad.End(0,fixture.Sha256));Assert.Throws<InvalidDataException>(()=>bad.Complete());
+        }finally{Directory.Delete(root,true);}
+    }
     [Fact]public void CancellationAndReorderingNeverPublish()
     {
         var root=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString());

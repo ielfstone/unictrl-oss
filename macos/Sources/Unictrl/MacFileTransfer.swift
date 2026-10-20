@@ -49,7 +49,7 @@ private final class FileWire: @unchecked Sendable {
 final class MacFileTransfer: ObservableObject {
     @Published private(set) var status = "Files off"
     @Published private(set) var incoming = ""
-    @Published private(set) var busy = false
+    @Published private(set) var busy = false { didSet { pasteLock.withLock { transferBusy = busy } } }
     @Published private(set) var progress = 0.0
     @Published private(set) var receivedURLs: [URL] = []
     private let server: PeerServer
@@ -66,7 +66,7 @@ final class MacFileTransfer: ObservableObject {
     private var grant: Grant?, wire: FileWire?, job: Task<Void, Never>?
     private var generation = UUID()
     private let pasteLock = NSLock()
-    private var pasteID: String?, pasteCount = 0, pasteScheduled = false
+    private var pasteID: String?, pasteCount = 0, pasteScheduled = false, transferBusy = false
     var canReplayPaste: () -> Bool = { true }
     init(server: PeerServer, keyFor: @escaping (String) -> String?, pasteboard: NSPasteboard = .general, receiveDirectory: URL? = nil) { self.server = server; self.keyFor = keyFor; self.board = pasteboard; self.receiveDirectory = receiveDirectory ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Unictrl Received") }
     private var ready: Bool { enabled && selected.flatMap { remoteEnabled[$0] } == true }
@@ -102,8 +102,12 @@ final class MacFileTransfer: ObservableObject {
         case "clear":
             offers = offers.filter { $0.value.mode != "clipboard" }; pasteLock.withLock { pasteID = nil; pasteScheduled = false }; refreshIncoming()
         case "request":
-            guard let id = command.id, let source = sources[id], Date().timeIntervalSince(source.created) < 1800 else { return }
-            issue(source.offer, sender: true, remoteRate: command.rate ?? 10, paste: nil)
+            guard let request = command.request, UUID(uuidString: request) != nil, let id = command.id, let source = sources[id], Date().timeIntervalSince(source.created) < 1800 else { return }
+            issue(source.offer, sender: true, remoteRate: command.rate ?? 10, paste: nil, request: request)
+        case "withdraw":
+            guard let id = command.id else { return }; offers[id] = nil
+            pasteLock.withLock { if pasteID == id { pasteID = nil; pasteScheduled = false } }; refreshIncoming()
+            if id == grant?.offer.id, grant?.sender == false { cancel(notify: false) }
         case "cancel": if command.id == grant?.offer.id { cancel(notify: false) }
         default: break
         }
@@ -135,7 +139,7 @@ final class MacFileTransfer: ObservableObject {
     func receive() { if let offer = offers.values.sorted(by: { $0.mode > $1.mode }).first { receive(offer, paste: nil) } }
     func tryPaste() -> Bool {
         let state: (String?, Bool) = pasteLock.withLock {
-            guard let id = pasteID else { return (nil, false) }; if pasteScheduled { return (id, true) }
+            guard let id = pasteID else { return (nil, false) }; if pasteScheduled || transferBusy { return (id, true) }
             pasteScheduled = true; return (id, false)
         }
         guard let id = state.0 else { return false }; if state.1 { return true }
@@ -145,14 +149,14 @@ final class MacFileTransfer: ObservableObject {
         }
         return true
     }
-    private func receive(_ offer: FileOffer, paste: Paste?) { issue(offer, sender: false, remoteRate: rate, paste: paste) }
-    private func issue(_ offer: FileOffer, sender: Bool, remoteRate: Int, paste: Paste?) {
+    private func receive(_ offer: FileOffer, paste: Paste?) { if busy { pasteLock.withLock { pasteScheduled = false }; return }; issue(offer, sender: false, remoteRate: rate, paste: paste) }
+    private func issue(_ offer: FileOffer, sender: Bool, remoteRate: Int, paste: Paste?, request: String? = nil) {
         guard ready, !busy else { return }
         var bytes = Data(count: 16)
         guard bytes.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }) == errSecSuccess else { return }
         busy = true; progress = 0; status = "Connecting file transfer…"
         let value = Grant(bytes: bytes, offer: offer, sender: sender, expires: Date().addingTimeInterval(10), rate: FileProtocol.rate(rate, remoteRate), paste: paste); grant = value
-        send(FileCommand(kind: "ticket", id: offer.id, ticket: bytes.base64EncodedString(), rate: value.rate))
+        send(FileCommand(kind: "ticket", id: offer.id, ticket: bytes.base64EncodedString(), rate: value.rate, request: request))
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self, self.grant?.bytes == bytes, self.wire == nil else { return }; self.cancel(); self.status = "File connection timed out; try Receive again"
         }
@@ -187,14 +191,14 @@ final class MacFileTransfer: ObservableObject {
                         self.status = grant.sender ? "Files sent" : "Files received · saved in Downloads/Unictrl Received"
                         if !received.isEmpty {
                             self.receivedURLs = received; self.offers[grant.offer.id] = nil; self.refreshIncoming()
-                            if let paste = grant.paste, self.board.changeCount == paste.count {
+                            if let paste = grant.paste, self.pasteLock.withLock({ self.pasteID == grant.offer.id }), self.board.changeCount == paste.count {
                                 self.board.clearContents()
                                 if self.board.writeObjects(received as [NSURL]) {
                                     self.onClipboardWritten?()
                                     if self.canReplayPaste(), NSWorkspace.shared.frontmostApplication?.processIdentifier == paste.pid { Self.replayPaste() }
                                 } else { self.status = "Files received; use Copy received files to paste" }
                             }
-                            self.pasteLock.withLock { self.pasteID = nil; self.pasteScheduled = false }
+                            self.pasteLock.withLock { if self.pasteID == grant.offer.id { self.pasteID = nil; self.pasteScheduled = false } }
                         }
                     }
                 } catch {
@@ -259,7 +263,10 @@ final class MacFileTransfer: ObservableObject {
     }
     func showReceived() { if !receivedURLs.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(receivedURLs) } }
     func cancel(notify: Bool = true) {
-        if notify, let id = grant?.offer.id { send(FileCommand(kind: "cancel", id: id)) }
+        if notify, let id = grant?.offer.id {
+            if grant?.sender == true { sources[id] = nil; send(FileCommand(kind: "withdraw", id: id)) }
+            send(FileCommand(kind: "cancel", id: id))
+        }
         generation = UUID(); grant = nil; wire?.close(); wire = nil; job?.cancel(); job = nil; busy = false; progress = 0
         pasteLock.withLock { pasteScheduled = false }; status = "File transfer cancelled"
     }

@@ -9,10 +9,10 @@ internal static class FileSelfTest
 {
     public static void Run()
     {
-        RunCase(true,false); RunCase(false,false); RunCase(false,true); NativeFileClipboard();
+        RunCase(true,false); RunCase(false,false); RunCase(false,true); RunCase(false,false,true); LateTicketAfterCancellation(); NativeFileClipboard();
         Log.Write("files_test","passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list bounded_streaming");
     }
-    private static void RunCase(bool fromWindows,bool cancelTransfer)
+    private static void RunCase(bool fromWindows,bool cancelTransfer,bool supersede=false)
     {
         var root=Path.Combine(Path.GetTempPath(),"Unictrl file test "+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
@@ -25,9 +25,13 @@ internal static class FileSelfTest
             var settings=new Settings{Enabled=true,ClipboardEnabled=true,ClipboardFilesEnabled=true,FileRateMiB=100,
                 DeviceId=Guid.NewGuid().ToString("D"),MacAddress="127.0.0.1",Port=((IPEndPoint)listener.LocalEndpoint).Port,PairingKey="ci-files-not-a-real-key"};
             var ticket=Enumerable.Repeat((byte)7,16).ToArray();
-            var offer=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),"drop",[new("source.bin",small.Length)]);
+            var offer=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),supersede?"clipboard":"drop",[new("source.bin",small.Length)]);
             string? failure=null;using var finished=new ManualResetEventSlim();using var chunkSent=new ManualResetEventSlim();
             using var desktop=new DesktopClipboard(_=>{},_=>{});
+            using var nativeReady=new ManualResetEventSlim();desktop.SetActive(true,nativeReady.Set);Check(nativeReady.Wait(3000),"native pasteboard ready");
+            nativeReady.Reset();desktop.Write("original clipboard text",()=>true,nativeReady.Set);Check(nativeReady.Wait(3000),"native paste baseline");
+            var beforeClipboard=GetClipboardSequenceNumber();
+            FileViewState? lastState=null;using var requestedLatest=new ManualResetEventSlim();
             WindowsFileTransfer? service=null;
             var mock=Task.Run(async ()=>{
                 using var socket=await listener.AcceptTcpClientAsync();using var stream=socket.GetStream();stream.ReadTimeout=60000;stream.WriteTimeout=60000;
@@ -57,6 +61,12 @@ internal static class FileSelfTest
                 {
                     Send(stream,cipher,new("begin",Index:0));
                     var first=small[..FileProtocol.ChunkSize];stream.Write(cipher.Seal(FileProtocol.Chunk(0,0,first)));chunkSent.Set();
+                    if(supersede)
+                    {
+                        var replacement=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),"clipboard",[new("newest.bin",small.Length)]);
+                        service!.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:replacement))[1..]);
+                        Check(service.TryPaste(),"repeat paste while transferring consumed");
+                    }
                     if(cancelTransfer)
                     {
                         try{Read(stream,cipher);throw new Exception("Cancelled transfer stayed open");}catch(IOException){}return;
@@ -66,16 +76,21 @@ internal static class FileSelfTest
                     Send(stream,cipher,new("complete",Id:offer.Id));Check(FileProtocol.Decode(Read(stream,cipher)).Kind=="received","native receive acknowledged");
                 }
             });
-            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{if(state.Status.StartsWith("File transfer stopped:",StringComparison.Ordinal)){failure=state.Status;finished.Set();}if(state.Status is "Files sent" or "Files received · saved in Downloads/Unictrl Received")finished.Set();},received);
+            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{lastState=state;if(state.Status.StartsWith("File transfer stopped:",StringComparison.Ordinal)){failure=state.Status;finished.Set();}if(state.Status is "Files sent" or "Files received · saved in Downloads/Unictrl Received")finished.Set();},received);
             files.Attach(data=>{
                 if(data[0]==0x34){filesControl(MessageType.FileCapabilities,[1,1]);return;}
                 var command=FileProtocol.Decode(data);
                 if(command.Kind=="offer")offer=command.Offer!;
-                if(command.Kind is "offer" or "request")filesControl(MessageType.FileCommand,FileProtocol.Encode(new("ticket",Id:offer.Id,Ticket:Convert.ToBase64String(ticket),Rate:100))[1..]);
+                if(command.Kind is "offer" or "request")
+                {
+                    var id=command.Kind=="offer"?offer.Id:command.Id;
+                    filesControl(MessageType.FileCommand,FileProtocol.Encode(new("ticket",Id:id,Ticket:Convert.ToBase64String(ticket),Rate:100,Request:command.Request))[1..]);
+                    if(command.Kind=="request"&&id!=offer.Id)requestedLatest.Set();
+                }
             });
             void filesControl(MessageType type,byte[] data)=>service!.Control(type,data);
             if(fromWindows)files.Offer([source,big]);
-            else{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);Thread.Sleep(50);Check(!chunkSent.IsSet,"offer must not start data transfer");files.Receive();}
+            else{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);Thread.Sleep(50);Check(!chunkSent.IsSet,"offer must not start data transfer");if(supersede)Check(files.TryPaste(),"native paste starts download");else files.Receive();}
             if(cancelTransfer)
             {
                 Check(chunkSent.Wait(8000),"partial chunk sent");Thread.Sleep(100);files.Cancel();Check(mock.Wait(8000),"cancel closes network");
@@ -86,9 +101,30 @@ internal static class FileSelfTest
             {
                 Check(finished.Wait(90000),"file transport completed");Check(failure is null,failure??"file transport failed");Check(mock.Wait(8000),"peer completed");mock.GetAwaiter().GetResult();
                 if(!fromWindows){var path=Directory.GetFiles(received,"source.bin",SearchOption.AllDirectories).Single();Check(File.ReadAllBytes(path).SequenceEqual(small),"Mac to Windows received bytes");}
+                if(supersede)
+                {
+                    Check(GetClipboardSequenceNumber()==beforeClipboard,"older transfer did not overwrite clipboard");
+                    Check(lastState?.Incoming.Contains("newest.bin")==true,"new offer survived old completion");
+                    Check(files.TryPaste(),"new offer remains pasteable");Check(requestedLatest.Wait(3000),"new offer requested after old completion");files.Cancel();
+                }
             }
         }
         finally{listener.Stop();try{Directory.Delete(root,true);}catch{}}
+    }
+    private static void LateTicketAfterCancellation()
+    {
+        using var desktop=new DesktopClipboard(_=>{},_=>{});var requests=new List<FileCommand>();var connections=0;
+        var settings=new Settings{Enabled=true,ClipboardEnabled=true,ClipboardFilesEnabled=true,MacAddress="127.0.0.1",Port=1,DeviceId=Guid.NewGuid().ToString(),PairingKey="ci-late-ticket-only"};
+        using var files=new WindowsFileTransfer(settings,desktop,state=>{if(state.Status=="Connecting file transfer…")Interlocked.Increment(ref connections);});
+        files.Attach(data=>{if(data[0]==0x35){var command=FileProtocol.Decode(data);if(command.Kind=="request")requests.Add(command);}});
+        files.Control(MessageType.FileCapabilities,[1,1]);
+        var offer=new FileOffer(Guid.NewGuid().ToString(),"drop",[new("late.bin",1)]);
+        files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);files.Receive();
+        var first=requests.Single();files.Cancel();
+        var late=FileProtocol.Encode(new("ticket",Id:offer.Id,Ticket:Convert.ToBase64String(new byte[16]),Request:first.Request));
+        files.Control(MessageType.FileCommand,late[1..]);Check(connections==0,"cancelled ticket ignored");
+        files.Receive();Check(requests.Count==2&&requests[1].Request!=first.Request,"retry gets a fresh request ID");
+        files.Control(MessageType.FileCommand,late[1..]);Check(connections==0,"old ticket cannot bind to retry");files.Cancel();
     }
     private static void NativeFileClipboard()
     {
@@ -108,5 +144,6 @@ internal static class FileSelfTest
     private static void Send(NetworkStream stream,SecureChannel cipher,FileCommand command)=>stream.Write(cipher.Seal(FileProtocol.Encode(command)));
     private static byte[] Read(NetworkStream stream,SecureChannel cipher)
     {var prefix=new byte[2];stream.ReadExactly(prefix);var length=BinaryPrimitives.ReadUInt16BigEndian(prefix);if(length is <17 or >SecureChannel.MaxFrame)throw new IOException("Bad frame");var bytes=new byte[length];stream.ReadExactly(bytes);return cipher.Open(bytes);}
+    [DllImport("user32.dll")]private static extern uint GetClipboardSequenceNumber();
     private static void Check(bool value,string name){if(!value)throw new Exception("File self-test: "+name);}
 }

@@ -37,6 +37,18 @@ import Testing
         #expect(try Data(contentsOf: urls[0]) == data)
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).count == 1)
     }
+    @Test func emptyFileAndCorruptedFullPayload() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let empty = FileOffer(id: UUID().uuidString, mode: "drop", files: [FileEntry(name: ".part-0", size: 0)])
+        let inbox = try FileInbox(offer: empty, directory: root); try inbox.begin(0); try inbox.end(0, hash: ClipboardReplica.digest(Data()))
+        #expect(try Data(contentsOf: inbox.complete()[0]).isEmpty)
+        let fixture = try Self.fixture()
+        let bad = try FileInbox(offer: fixture.offer, directory: root); try bad.begin(0)
+        let zeros = Data(repeating: 0, count: Int(fixture.offer.size))
+        for offset in stride(from: 0, to: zeros.count, by: FileProtocol.chunkSize) { try bad.append(index: 0, offset: Int64(offset), bytes: zeros.subdata(in: offset..<min(zeros.count, offset + FileProtocol.chunkSize))) }
+        #expect(throws: (any Error).self) { try bad.end(0, hash: fixture.sha256) }
+        #expect(throws: (any Error).self) { _ = try bad.complete() }
+    }
     @Test func corruptionCancellationAndReorderingNeverPublish() throws {
         let fixture = try Self.fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }

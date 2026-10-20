@@ -17,6 +17,7 @@ struct FileCommand: Codable {
     var rate: Int? = nil
     var index: Int? = nil
     var hash: String? = nil
+    var request: String? = nil
 }
 enum FileProtocol {
     static let clipboardLimit: Int64 = 100 * 1_048_576

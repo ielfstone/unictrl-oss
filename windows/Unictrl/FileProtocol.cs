@@ -11,7 +11,7 @@ internal sealed record FileOffer(string Id, string Mode, FileEntry[] Files)
     [JsonIgnore] public string Summary => $"{Files.Length} file(s) · {Size / 1048576.0:0.##} MiB";
 }
 internal sealed record FileCommand(string Kind, FileOffer? Offer = null, string? Id = null, string? Ticket = null,
-    int? Rate = null, int? Index = null, string? Hash = null);
+    int? Rate = null, int? Index = null, string? Hash = null, string? Request = null);
 internal static class FileProtocol
 {
     public const long ClipboardLimit = 100L * 1048576, FileLimit = 1073741824, BatchLimit = 4L * 1073741824;
