@@ -20,6 +20,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (Environment.GetCommandLineArgs().Contains("--panel-test")) { PanelSelfTest.Start(); return; }
         if (RunDiagnostic(Environment.GetCommandLineArgs())) { Exit(); return; }
         singleInstance = new Mutex(true, @"Local\UnictrlSingleInstance", out var first);
         if (!first)

@@ -50,7 +50,7 @@ Unictrl 0.7.0 — macOS 通用版（Apple 芯片和 Intel）
 纯文本最多 UTF-8 1 MiB；等待 Ready 后粘贴，只传新复制内容。保留原有配对。
 文件需两端均为 0.7.0 并开启 Share files。复制/粘贴整批限 100 MiB；在对端按 Ctrl+V / ⌘V 后下载，目标应用保持前台则完成后继续粘贴。
 拖拽或选择文件每个限 1 GiB、整批 4 GiB，最多 32 个，对端点 Receive files 后才传数据。文件夹请先压缩。
-限速默认 10 MiB/s，可调 1–100 MiB/s，双方较低值生效，可看进度和取消。接收至 Downloads/Unictrl Received，不覆盖旧文件。
+限速默认 10 MiB/s，可调 1–100 MiB/s，双方较低值生效，可看进度和取消。点击菜单栏图标打开文件面板，拖拽发送、接收通知、显示进度或取消。面板接收先选择保存目录；复制粘贴文件仅缓存一小时，设置保留最近 100 条历史，不额外存一份文件。
 Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在 Mac 上方”。
 支持拖动任意屏幕并吸附到上下左右四个方向。
 
@@ -69,7 +69,7 @@ Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在
 未安装完整 Xcode 时使用项目自带的 ICNS 图标。
 应用上游默认启用“登录时启动”，可以在 Unictrl 设置中关闭。
 
-源码：https://github.com/ielfstone/unictrl-oss/tree/feature/clipboard-files
+源码：https://github.com/ielfstone/unictrl-oss/tree/feature/transfer-panel
 上游版本：v0.1.0；本地版本：0.7.0
 布局基线：db181b7e0ec03ed271dac5ed6df90b92c4d8b745
 许可证：GPL-3.0；完整许可证见 LICENSE.txt。

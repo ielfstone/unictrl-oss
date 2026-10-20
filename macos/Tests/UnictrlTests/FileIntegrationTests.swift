@@ -141,6 +141,12 @@ import Testing
         #expect(service.notice.contains("100 MiB")); #expect(service.tryPaste())
         #expect(board.types?.contains(.fileURL) != true)
         service.control(try FileProtocol.encode(FileCommand(kind: "clear")), from: peer)
+        let oversize = root.appendingPathComponent("too-large.bin")
+        FileManager.default.createFile(atPath: oversize.path, contents: nil)
+        let largeHandle = try FileHandle(forWritingTo: oversize); try largeHandle.truncate(atOffset: UInt64(FileProtocol.clipboardLimit + 1)); try largeHandle.close()
+        service.offer([oversize], clipboard: true)
+        let rejected = try FileProtocol.decode(await control.readMessage(controlCipher)); #expect(rejected.kind == "blocked"); #expect(rejected.reason == "too-large")
+        #expect(service.notice.contains("transfer panel"))
         #expect(service.history.count == 8) // One sent, first receive, six repeated receives.
 
         // A newer remote copy must survive completion of an older, already downloading file.

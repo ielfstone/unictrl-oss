@@ -68,6 +68,10 @@ $fileProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -Argum
 if (-not $fileProcess.WaitForExit(120000)) { $fileProcess.Kill(); Get-Content $log; throw 'File native integration test timed out.' }
 if ($fileProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'files_test passed' -Quiet)) { Get-Content $log; throw 'File native integration test failed.' }
 Write-Host "FILE_TRANSFER_TEST=passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list"
+$panelProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--panel-test' -WorkingDirectory $payload -PassThru
+if (-not $panelProcess.WaitForExit(30000)) { $panelProcess.Kill(); Get-Content $log; throw 'Tray panel native test timed out.' }
+if ($panelProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'panel_test passed' -Quiet)) { Get-Content $log; throw 'Tray panel native test failed.' }
+Copy-Item (Join-Path $payload 'Data/panel-test.png') (Join-Path $out 'windows-tests/panel-test.png')
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'

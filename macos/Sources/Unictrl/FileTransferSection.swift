@@ -5,6 +5,17 @@ import UniformTypeIdentifiers
 struct FileTransferSection: View {
     @ObservedObject var controller: AppController
     @ObservedObject var service: MacFileTransfer
+    var body: some View {
+        FileTransferCard(enabled: controller.clipboardFilesEnabled && controller.clipboardEnabled, service: service) {
+            controller.clipboardEnabled = true; controller.clipboardFilesEnabled = true
+        }
+    }
+}
+
+struct FileTransferCard: View {
+    let enabled: Bool
+    @ObservedObject var service: MacFileTransfer
+    let enable: () -> Void
     @State private var hovering = false
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -13,9 +24,9 @@ struct FileTransferSection: View {
                 Spacer()
                 if service.busy { Button("Cancel") { service.cancel() }.controlSize(.small) }
             }
-            if !controller.clipboardFilesEnabled || !controller.clipboardEnabled {
+            if !enabled {
                 Text("Send files to your paired computer").font(.caption).foregroundStyle(.secondary)
-                Button("Enable file sharing") { controller.clipboardEnabled = true; controller.clipboardFilesEnabled = true }
+                Button("Enable file sharing", action: enable)
             } else {
                 VStack(spacing: 5) {
                     Image(systemName: "tray.and.arrow.up").font(.title2).foregroundStyle(Color.pine)

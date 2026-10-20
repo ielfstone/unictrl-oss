@@ -18,8 +18,9 @@ internal sealed class QuickPanel : Window
     private readonly Button receive = new() { Content = "Receive & save…" }, cancel = new() { Content = "Cancel" }, choose = new() { Content = "Choose files…" };
     private readonly Border inbox, drop;
     private readonly ToggleSwitch enabled;
+    private readonly Button enableFiles = new() { Content = "Enable file sharing" };
     private bool picking;
-    public QuickPanel(Settings settings, WindowsFileTransfer files, Action openSettings, Action<bool> setEnabled, Action quit)
+    public QuickPanel(Settings settings, WindowsFileTransfer files, Action openSettings, Action<bool> setEnabled, Action enableSharing, Action quit)
     {
         this.settings = settings; this.files = files; Title = "Unictrl";
         AppWindow.IsShownInSwitchers = false;
@@ -35,6 +36,7 @@ internal sealed class QuickPanel : Window
         Grid.SetColumn(enabled, 1); header.Children.Add(enabled); enabled.Toggled += (_, _) => { if (settings.Enabled != enabled.IsOn) setEnabled(enabled.IsOn); };
         root.Children.Add(header);
         root.Children.Add(Text("File transfer", 15, true));
+        enableFiles.Click += (_, _) => enableSharing(); root.Children.Add(enableFiles);
         var dropContent = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         dropContent.Children.Add(new FontIcon { Glyph = "\uE898", FontSize = 27 });
         dropContent.Children.Add(Text("Drop files to send", 14, true)); dropContent.Children.Add(choose);
@@ -59,6 +61,8 @@ internal sealed class QuickPanel : Window
     public void UpdateConnection(string text) { connection.Text = text; enabled.IsOn = settings.Enabled; }
     public void Update(FileViewState state)
     {
+        enableFiles.Visibility = settings.ClipboardEnabled && settings.ClipboardFilesEnabled ? Visibility.Collapsed : Visibility.Visible;
+        drop.Visibility = settings.ClipboardEnabled && settings.ClipboardFilesEnabled ? Visibility.Visible : Visibility.Collapsed;
         status.Text = state.Status; incoming.Text = state.Incoming; notice.Text = state.Notice;
         notice.Visibility = state.Notice.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         inbox.Visibility = state.Incoming.Length > 0 ? Visibility.Visible : Visibility.Collapsed;

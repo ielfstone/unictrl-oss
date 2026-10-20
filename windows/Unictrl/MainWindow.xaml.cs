@@ -149,7 +149,7 @@ public sealed partial class MainWindow : Window
     private void EnsureQuickPanel()
     {
         if (quickPanel is not null) return;
-        quickPanel = new QuickPanel(settings, clipboard.Files, ShowWindow, value => EnabledSwitch.IsOn = value, Quit);
+        quickPanel = new QuickPanel(settings, clipboard.Files, ShowWindow, value => EnabledSwitch.IsOn = value, () => { ClipboardSwitch.IsOn = true; ClipboardFilesSwitch.IsOn = true; }, Quit);
         quickPanel.Update(lastFileState); quickPanel.UpdateConnection(StatusText.Text);
     }
     private void OnOpenTransferPanel(object sender, RoutedEventArgs e) { EnsureQuickPanel(); quickPanel!.Show(); }

@@ -318,6 +318,7 @@ final class MacFileTransfer: ObservableObject {
     }
     func showReceived() { if !receivedURLs.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(receivedURLs) } }
     func cancel(notify: Bool = true) {
+        if busy, let grant { record(grant.offer, sent: grant.sender, result: "Cancelled") }
         if notify, let id = grant?.offer.id {
             if grant?.sender == true { sources[id] = nil; send(FileCommand(kind: "withdraw", id: id)) }
             send(FileCommand(kind: "cancel", id: id))
