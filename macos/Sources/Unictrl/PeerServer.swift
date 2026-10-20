@@ -7,6 +7,7 @@ import Security
 /// and replaces that PC's session only once it has proven its key, so stray or failed connections
 /// never interrupt the pointer. Callbacks run on the main queue.
 final class PeerServer {
+    var onFileConnection: ((NWConnection) -> Void)?
     var onClipboardConnection: ((NWConnection) -> Void)?
     var onConnected: ((_ peer: String, _ name: String) -> Void)?
     var onDisconnected: ((_ peer: String, _ reason: String) -> Void)?
@@ -114,6 +115,8 @@ final class PeerServer {
         connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { [weak self] data, _, _, _ in
             guard let self else { return }
             switch data {
+            case FileProtocol.magic?:
+                if let accept = self.onFileConnection { accept(connection) } else { connection.cancel() }
             case MacClipboardSync.magic?:
                 if let accept = self.onClipboardConnection { accept(connection) } else { connection.cancel() }
             case Self.sessionV1?: readSession(session, withID: false)

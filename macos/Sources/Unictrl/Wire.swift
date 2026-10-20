@@ -4,6 +4,8 @@ import Foundation
 /// Message types. See docs/PROTOCOL.md; the Windows receiver mirrors these values.
 enum MessageType: UInt8 {
     case clipboardCapabilities = 0x30 // u8 version=1, u8 enabled
+    case fileCapabilities = 0x34
+    case fileCommand = 0x35
     case clipboardImageCapabilities = 0x32 // u8 version=1, u8 enabled
     case clipboardTicket = 0x31       // one-use 16-byte grant, control connection only
     case clipboardData = 0x33         // text-v1 JSON on the independent encrypted connection

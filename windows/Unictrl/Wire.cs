@@ -11,6 +11,7 @@ internal enum MessageType : byte
     ClipboardImageCapabilities = 0x32,
     ClipboardTicket = 0x31,
     ClipboardData = 0x33,
+    FileCapabilities = 0x34, FileCommand = 0x35,
     Hello = 0x01,
     Screen = 0x02,
     Arrangement = 0x03,

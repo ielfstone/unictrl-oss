@@ -27,6 +27,8 @@ struct UnictrlSettings: Codable {
     var pcPointerScale = 1.0
     /// Scales scrolling sent to PCs; `scrollScale` is the Mac's own.
     var pcScrollScale = 1.0
+    var clipboardFilesEnabled = false
+    var fileRateMiB = 10
     var clipboardImagesEnabled = false
     var clipboardEnabled = false
     var clipboardPeerID: String?
@@ -55,7 +57,7 @@ struct UnictrlSettings: Codable {
         .appendingPathComponent("Unictrl/settings.json")
 
     private enum CodingKeys: String, CodingKey {
-        case pcPointerScale, pcScrollScale, shareChannel, readySound, readySoundName, clipboardEnabled, clipboardImagesEnabled, clipboardPeerID
+        case pcPointerScale, pcScrollScale, shareChannel, readySound, readySoundName, clipboardEnabled, clipboardImagesEnabled, clipboardPeerID, clipboardFilesEnabled, fileRateMiB
         case peers, arrangement, pairingKey, deviceID, port, peerSide, verticalOffsetMm, invertScroll, scrollScale,
              reverseMouseWheel, smoothScrolling, pointerMode, enabled, sleepHandoff, showMenuBarIcon, showDockIcon,
              macAlias, loginItemConfigured, diagnostics
@@ -82,6 +84,8 @@ struct UnictrlSettings: Codable {
         shareChannel = try c.decodeIfPresent(Int.self, forKey: .shareChannel)
         readySound = try c.decodeIfPresent(Bool.self, forKey: .readySound) ?? true
         readySoundName = try c.decodeIfPresent(String.self, forKey: .readySoundName) ?? "Glass"
+        clipboardFilesEnabled = try c.decodeIfPresent(Bool.self, forKey: .clipboardFilesEnabled) ?? false
+        fileRateMiB = min(100, max(1, try c.decodeIfPresent(Int.self, forKey: .fileRateMiB) ?? 10))
         clipboardImagesEnabled = try c.decodeIfPresent(Bool.self, forKey: .clipboardImagesEnabled) ?? false
         clipboardEnabled = try c.decodeIfPresent(Bool.self, forKey: .clipboardEnabled) ?? false
         clipboardPeerID = try c.decodeIfPresent(String.self, forKey: .clipboardPeerID)

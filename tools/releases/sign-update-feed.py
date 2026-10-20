@@ -5,6 +5,7 @@ from pathlib import Path
 p = argparse.ArgumentParser()
 p.add_argument('--version', required=True); p.add_argument('--mac-zip', type=Path, required=True)
 p.add_argument('--mac-dmg', type=Path)
+p.add_argument('--windows-installer-sha256'); p.add_argument('--windows-installer-size', type=int)
 p.add_argument('--windows-sha256', required=True); p.add_argument('--windows-size', type=int, required=True)
 p.add_argument('--output', type=Path, required=True)
 a = p.parse_args()
@@ -14,6 +15,10 @@ base = f'https://github.com/ielfstone/unictrl-oss/releases/download/v{a.version}
 release = {'version': a.version,
     'macos': {'url': base + a.mac_zip.name, 'sha256': hashlib.sha256(a.mac_zip.read_bytes()).hexdigest(), 'size': a.mac_zip.stat().st_size},
     'windows': {'url': base + f'Unictrl-{a.version}-windows-x64-portable.zip', 'sha256': a.windows_sha256, 'size': a.windows_size}}
+if a.windows_installer_sha256 or a.windows_installer_size:
+    if not a.windows_installer_sha256 or not re.fullmatch(r'[0-9a-f]{64}', a.windows_installer_sha256) or not a.windows_installer_size or a.windows_installer_size <= 0:
+        raise SystemExit('Invalid installer checksum or size')
+    release['windowsInstaller'] = {'url': base + f'Unictrl-{a.version}-windows-x64-Setup.exe', 'sha256': a.windows_installer_sha256, 'size': a.windows_installer_size}
 if a.mac_dmg:
     release['macosDmg'] = {'url': base + a.mac_dmg.name, 'sha256': hashlib.sha256(a.mac_dmg.read_bytes()).hexdigest(), 'size': a.mac_dmg.stat().st_size}
 payload = json.dumps(release, separators=(',', ':')).encode()

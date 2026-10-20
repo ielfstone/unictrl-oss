@@ -31,10 +31,18 @@ public sealed partial class MainWindow : Window
             UpdateProgress.Value = (state.Progress ?? 0) * 100;
         }));
         AutomaticUpdatesSwitch.IsOn = settings.AutomaticUpdates;
-        clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text));
+        clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text), state => DispatcherQueue.TryEnqueue(() => {
+            FileStatus.Text = state.Status; FileIncoming.Text = state.Incoming;
+            FileProgress.Visibility = state.Busy ? Visibility.Visible : Visibility.Collapsed; FileProgress.Value = state.Progress * 100;
+            ReceiveFilesButton.IsEnabled = !state.Busy && state.Incoming.Length > 0;
+            CancelFilesButton.IsEnabled = state.Busy; ChooseFilesButton.IsEnabled = !state.Busy;
+            ShowFilesButton.IsEnabled = CopyFilesButton.IsEnabled = state.HasReceived;
+        }));
+        ClipboardFilesSwitch.IsOn = settings.ClipboardFilesEnabled;
+        FileRateBox.SelectedIndex = Array.IndexOf(new[] {1,5,10,20,50,100}, settings.FileRateMiB);
         ClipboardImagesSwitch.IsOn = settings.ClipboardImagesEnabled;
         ClipboardSwitch.IsOn = settings.ClipboardEnabled;
-        ClipboardImagesSwitch.IsEnabled = settings.ClipboardEnabled;
+        ClipboardImagesSwitch.IsEnabled = ClipboardFilesSwitch.IsEnabled = settings.ClipboardEnabled;
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "Unictrl.ico");
         AppWindow.SetIcon(icon);
         ExtendsContentIntoTitleBar = true;
@@ -234,6 +242,45 @@ public sealed partial class MainWindow : Window
     private void OnCancelUpdate(object sender, RoutedEventArgs e) => updater.CancelDownload();
     private void OnCheckUpdate(object sender, RoutedEventArgs e) => _ = updater.Check();
     private void OnInstallUpdate(object sender, RoutedEventArgs e) => updater.Install(Quit);
+    private void OnClipboardFilesToggled(object sender, RoutedEventArgs e)
+    {
+        if (settings.ClipboardFilesEnabled == ClipboardFilesSwitch.IsOn) return;
+        settings.ClipboardFilesEnabled = ClipboardFilesSwitch.IsOn; settings.Save(); clipboard.Refresh();
+    }
+    private void OnFileRateChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FileRateBox.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag as string, out var rate)) { settings.FileRateMiB = rate; settings.Save(); }
+    }
+    private void OnReceiveFiles(object sender, RoutedEventArgs e) => clipboard.Files.Receive();
+    private void OnCancelFiles(object sender, RoutedEventArgs e) => clipboard.Files.Cancel();
+    private void OnShowFiles(object sender, RoutedEventArgs e) => clipboard.Files.ShowReceived();
+    private void OnCopyFiles(object sender, RoutedEventArgs e) => clipboard.Files.CopyReceived();
+    private async void OnChooseFiles(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker(); picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var files = await picker.PickMultipleFilesAsync(); if (files.Count > 0) clipboard.Files.Offer(files.Select(f => f.Path).ToArray());
+        }
+        catch (Exception error) { FileStatus.Text = error.Message; }
+    }
+    private void OnFileDragOver(object sender, DragEventArgs e)
+    {
+        if (settings.ClipboardFilesEnabled && e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+        { e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy; e.DragUIOverride.Caption = "Offer files to the paired computer"; }
+        e.Handled = true;
+    }
+    private async void OnFilesDropped(object sender, DragEventArgs e)
+    {
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            if (items.Any(i => i is not Windows.Storage.StorageFile)) { FileStatus.Text = "Zip folders before sending"; return; }
+            clipboard.Files.Offer(items.Select(i => i.Path).ToArray());
+        }
+        catch (Exception error) { FileStatus.Text = error.Message; }
+    }
     private void OnClipboardImagesToggled(object sender, RoutedEventArgs e)
     {
         if (settings.ClipboardImagesEnabled == ClipboardImagesSwitch.IsOn) return;
@@ -242,7 +289,7 @@ public sealed partial class MainWindow : Window
     private void OnClipboardToggled(object sender, RoutedEventArgs e)
     {
         if (settings.ClipboardEnabled == ClipboardSwitch.IsOn) return;
-        settings.ClipboardEnabled = ClipboardSwitch.IsOn; ClipboardImagesSwitch.IsEnabled = settings.ClipboardEnabled; settings.Save(); clipboard.Refresh();
+        settings.ClipboardEnabled = ClipboardSwitch.IsOn; ClipboardImagesSwitch.IsEnabled = ClipboardFilesSwitch.IsEnabled = settings.ClipboardEnabled; settings.Save(); clipboard.Refresh();
     }
 
     private void OnEnabledToggled(object sender, RoutedEventArgs e)

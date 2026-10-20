@@ -9,6 +9,7 @@ internal sealed class ClipboardSync : IDisposable
     private readonly Settings settings;
     private readonly Action<string> status;
     private readonly DesktopClipboard desktop;
+    public WindowsFileTransfer Files { get; }
     private readonly object gate = new();
     private readonly SemaphoreSlim signal = new(0);
     private Queue<ClipboardPacket> output = new();
@@ -22,16 +23,17 @@ internal sealed class ClipboardSync : IDisposable
     private TcpClient? client;
     private CancellationTokenSource? transfer;
     private DateTime incomingAt;
-    public ClipboardSync(Settings settings, Action<string> status)
+    public ClipboardSync(Settings settings, Action<string> status, Action<FileViewState>? fileStatus = null)
     {
         this.settings = settings; this.status = status;
         desktop = new DesktopClipboard(LocalCopy, status);
+        Files = new WindowsFileTransfer(settings, desktop, fileStatus ?? (_ => { }));
     }
     private bool Enabled => settings.ClipboardEnabled && settings.Enabled && !disposed;
     public void Attach(object sessionOwner, Action<byte[]> send)
     {
         lock (gate) { Stop(); owner = sessionOwner; sendControl = send; remoteEnabled = remoteImages = false; }
-        Announce();
+        Files.Attach(send); Announce();
     }
     public void Detach(object sessionOwner)
     {
@@ -40,12 +42,12 @@ internal sealed class ClipboardSync : IDisposable
             if (!ReferenceEquals(owner, sessionOwner)) return;
             Stop(); owner = null; sendControl = null; remoteEnabled = remoteImages = false;
         }
-        status(Enabled ? "Waiting for Mac" : "Off");
+        Files.Detach(); status(Enabled ? "Waiting for Mac" : "Off");
     }
     public void Refresh()
     {
         lock (gate) Stop();
-        Announce();
+        Files.Refresh(); Announce();
     }
     private void Announce()
     {
@@ -67,6 +69,7 @@ internal sealed class ClipboardSync : IDisposable
         lock (gate)
         {
             if (!ReferenceEquals(owner, sessionOwner)) return;
+            if (type is MessageType.FileCapabilities or MessageType.FileCommand) { Files.Control(type, data); return; }
             if (type == MessageType.ClipboardCapabilities && data.Length == 2 && data[0] == 1 && data[1] <= 1)
             {
                 remoteEnabled = data[1] == 1;
@@ -139,7 +142,7 @@ internal sealed class ClipboardSync : IDisposable
                     Enqueue(effects.Packets);
                     if ((effects.Text is not null || effects.Png is not null) && effects.Id is { } copyId)
                         desktop.Write(new ClipboardContent(effects.Text, effects.Png), () => { lock (gate) return current == generation && ready && replica.IsCurrent(copyId); },
-                            () => { lock (gate) { if (current == generation && ready) { Enqueue([new("ack", copyId)]); status(ReadyStatus); } } });
+                            () => { lock (gate) { if (current == generation && ready) { Enqueue([new("ack", copyId)]); status(ReadyStatus); Files.RemoteClipboardWritten(); } } });
                 }
             }
         }
@@ -197,6 +200,8 @@ internal sealed class ClipboardSync : IDisposable
         lock (gate)
         {
             if (!ready || !Enabled) return;
+            Files.LocalClipboardChanged();
+            if (content?.Files is { } paths) Files.Offer(paths, clipboard: true);
             replica.CancelIncoming();
             if (content is null || (content.Png is null && string.IsNullOrEmpty(content.Text))) { replica.InvalidateLocal(); output = new Queue<ClipboardPacket>(output.Where(p => p.Kind == "order")); return; }
             var packets = content.Png is { } png ? replica.CopyImage(png) : replica.Copy(content.Text!);
@@ -212,5 +217,5 @@ internal sealed class ClipboardSync : IDisposable
         foreach (var packet in packets) output.Enqueue(packet);
         if (packets.Count != 0) signal.Release();
     }
-    public void Dispose() { lock (gate) { disposed = true; Stop(); owner = null; sendControl = null; } desktop.Dispose(); }
+    public void Dispose() { lock (gate) { disposed = true; Stop(); owner = null; sendControl = null; } Files.Dispose(); desktop.Dispose(); }
 }

@@ -23,6 +23,8 @@ public sealed class Settings
     /// 0 = use the monitor's reported physical size.
     public double ScreenWidthMmOverride { get; set; }
     public bool AutomaticUpdates { get; set; } = true;
+    public bool ClipboardFilesEnabled { get; set; }
+    public int FileRateMiB { get; set; } = 10;
     public bool ClipboardImagesEnabled { get; set; }
     public bool ClipboardEnabled { get; set; }
     public bool Enabled { get; set; } = true;

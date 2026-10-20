@@ -224,7 +224,7 @@ internal sealed class Receiver : IDisposable
     {
         switch (reader.Type)
         {
-            case MessageType.ClipboardCapabilities or MessageType.ClipboardImageCapabilities or MessageType.ClipboardTicket:
+            case MessageType.ClipboardCapabilities or MessageType.ClipboardImageCapabilities or MessageType.ClipboardTicket or MessageType.FileCapabilities or MessageType.FileCommand:
                 clipboard?.Control(this, reader.Type, reader.Rest());
                 break;
             case MessageType.Enter when reader.Has(4):

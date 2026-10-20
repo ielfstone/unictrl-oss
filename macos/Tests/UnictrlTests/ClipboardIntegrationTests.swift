@@ -4,7 +4,7 @@ import Network
 import Testing
 @testable import Unictrl
 
-private final class ClipboardTestClient {
+final class ClipboardTestClient {
     let connection: NWConnection
     init(port: UInt16) { connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp) }
     func open() async throws {

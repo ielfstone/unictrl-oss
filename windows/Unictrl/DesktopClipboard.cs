@@ -4,7 +4,7 @@ using System.Text;
 namespace Unictrl;
 
 /// Dedicated STA window. Neither a busy clipboard owner nor conversion blocks input/UI threads.
-internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null);
+internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null, string[]? Files = null);
 
 internal sealed class DesktopClipboard : IDisposable
 {
@@ -36,7 +36,13 @@ internal sealed class DesktopClipboard : IDisposable
         try
         {
             List<(uint Format, byte[] Bytes)> formats;
-            if (content.Png is { } png)
+            if (content.Files is { Length: > 0 } paths)
+            {
+                var list = Encoding.Unicode.GetBytes(string.Join('\0', paths) + "\0\0");
+                var drop = new byte[20 + list.Length]; BitConverter.GetBytes(20).CopyTo(drop, 0); BitConverter.GetBytes(1).CopyTo(drop, 16); list.CopyTo(drop, 20);
+                formats = [(15, drop), (RegisterClipboardFormatW("Preferred DropEffect"), BitConverter.GetBytes(1))];
+            }
+            else if (content.Png is { } png)
             {
                 if (!imagesAllowed) return;
                 using var image = ClipboardImage.Decode(png);
@@ -103,13 +109,29 @@ internal sealed class DesktopClipboard : IDisposable
         byte[]? imageBytes = null; uint imageFormat = 0;
         try
         {
-            if (!IsClipboardFormatAvailable(15) && !IsClipboardFormatAvailable(privateFormat))
+            if (!IsClipboardFormatAvailable(privateFormat))
             {
                 // Images take precedence over a browser's text/URL fallback, even when image sync is off.
                 imageFormat = IsClipboardFormatAvailable(pngFormat) ? pngFormat : IsClipboardFormatAvailable(17) ? 17u : IsClipboardFormatAvailable(8) ? 8u : 0;
                 if (imageFormat != 0)
                 {
                     if (imagesAllowed) imageBytes = ReadGlobal(imageFormat, imageFormat == pngFormat ? ClipboardReplica.MaxImageBytes + 64 : 100_000_000);
+                }
+                else if (IsClipboardFormatAvailable(15))
+                {
+                    var handle = GetClipboardData(15); var count = DragQueryFileW(handle, uint.MaxValue, null, 0);
+                    if (count is > 0 and <= 32)
+                    {
+                        var paths = new List<string>();
+                        for (uint index = 0; index < count; index++)
+                        {
+                            var length = DragQueryFileW(handle, index, null, 0);
+                            if (length > 32760) { paths.Clear(); break; }
+                            var name = new StringBuilder((int)length + 1); DragQueryFileW(handle, index, name, (uint)name.Capacity); paths.Add(name.ToString());
+                        }
+                        if (paths.Count == count) content = new(Files: paths.ToArray());
+                    }
+                    else status("Choose 1–32 files for sharing");
                 }
                 else if (IsClipboardFormatAvailable(13) && ReadGlobal(13, 2 * ClipboardReplica.MaxBytes + 64) is { } bytes)
                 {
@@ -190,6 +212,7 @@ internal sealed class DesktopClipboard : IDisposable
     }
     public void Dispose() { disposed = true; active = false; if (window != 0) Native.PostMessageW(window, 0x0012, 0, 0); }
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFileW(nint drop, uint index, StringBuilder? file, uint length);
     [DllImport("user32.dll")] private static extern bool AddClipboardFormatListener(nint hwnd);
     [DllImport("user32.dll")] private static extern bool RemoveClipboardFormatListener(nint hwnd);
     [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();

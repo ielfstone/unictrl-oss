@@ -85,12 +85,13 @@ struct SettingsView: View {
             Section("Shared clipboard") {
                 Toggle("Share text clipboard", isOn: $controller.clipboardEnabled)
                 Toggle("Share images too", isOn: $controller.clipboardImagesEnabled).disabled(!controller.clipboardEnabled)
+                FileTransferSection(controller: controller, service: controller.files)
                 Picker("Windows PC", selection: $controller.clipboardPeerID) {
                     Text("Automatic (one paired PC)").tag("")
                     ForEach(controller.devices) { Text($0.name).tag($0.id) }
                 }
                 Text(controller.clipboardStatus).font(.caption).foregroundStyle(.secondary)
-                Text("Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Files are not included.").font(.caption).foregroundStyle(.secondary)
+                Text("Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Enable Share files below for file transfers.").font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Software updates") {

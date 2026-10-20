@@ -16,7 +16,7 @@
     <SelfContained>true</SelfContained>
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <Company>Enliva LLC</Company>
     <Product>Unictrl</Product>
     <Copyright>© 2026 Enliva LLC</Copyright>

@@ -23,12 +23,12 @@ jobs:
           ./tools/windows/build-installer.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: Unictrl-0.5.0-windows-x64-portable
+          name: Unictrl-0.6.0-windows-x64-portable
           path: |
-            artifacts/Unictrl-0.5.0-windows-x64-portable.zip
-            artifacts/Unictrl-0.5.0-windows-x64-portable.zip.sha256
-            artifacts/Unictrl-0.5.0-windows-x64-Setup.exe
-            artifacts/Unictrl-0.5.0-windows-x64-Setup.exe.sha256
+            artifacts/Unictrl-0.6.0-windows-x64-portable.zip
+            artifacts/Unictrl-0.6.0-windows-x64-portable.zip.sha256
+            artifacts/Unictrl-0.6.0-windows-x64-Setup.exe
+            artifacts/Unictrl-0.6.0-windows-x64-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4

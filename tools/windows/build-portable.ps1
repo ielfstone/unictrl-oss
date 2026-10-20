@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'artifacts' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $stage = Join-Path $out ('windows-stage-' + [guid]::NewGuid().ToString('N'))
-$packageName = 'Unictrl-0.5.0-windows-x64-portable'
+$packageName = 'Unictrl-0.6.0-windows-x64-portable'
 $payload = Join-Path $stage $packageName
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 $project = Join-Path $repo 'windows/Unictrl/Unictrl.csproj'
@@ -64,6 +64,9 @@ if (-not (Select-String -LiteralPath $log -Pattern 'clipboard_test passed' -Quie
 $updateProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--update-test' -WorkingDirectory $payload -PassThru
 if (-not $updateProcess.WaitForExit(45000)) { $updateProcess.Kill(); throw 'Updater integration test timed out.' }
 if ($updateProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'update_test passed' -Quiet)) { Get-Content $log; throw 'Updater integration test failed.' }
+$fileProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--files-test' -WorkingDirectory $payload -PassThru
+if (-not $fileProcess.WaitForExit(120000)) { $fileProcess.Kill(); Get-Content $log; throw 'File native integration test timed out.' }
+if ($fileProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'files_test passed' -Quiet)) { Get-Content $log; throw 'File native integration test failed.' }
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'
@@ -86,7 +89,7 @@ foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
 }
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $payload 'Source.zip')
 $buildInfo = [ordered]@{
-    version = '0.5.0'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.6.0'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
     layoutVersion = 2; feature = 'text and PNG clipboard with signed automatic updates'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }

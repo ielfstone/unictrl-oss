@@ -104,12 +104,17 @@ import ServiceManagement
         }
     }
 
+    @Published var clipboardFilesEnabled: Bool { didSet { settings.clipboardFilesEnabled = clipboardFilesEnabled; settings.save(); refreshClipboard() } }
+    @Published var fileRateMiB: Int { didSet { settings.fileRateMiB = fileRateMiB; settings.save(); refreshClipboard() } }
+    private(set) var files: MacFileTransfer!
     @Published var clipboardImagesEnabled: Bool { didSet { settings.clipboardImagesEnabled = clipboardImagesEnabled; settings.save(); refreshClipboard() } }
     @Published var clipboardEnabled: Bool { didSet { settings.clipboardEnabled = clipboardEnabled; settings.save(); refreshClipboard() } }
     @Published var clipboardPeerID: String { didSet { settings.clipboardPeerID = clipboardPeerID.isEmpty ? nil : clipboardPeerID; settings.save(); refreshClipboard() } }
     @Published private(set) var clipboardStatus = "Off"
     private var clipboard: MacClipboardSync!
     private func refreshClipboard() {
+        let peer = clipboardPeerID.isEmpty ? (settings.peers.count == 1 ? settings.peers.first?.id : nil) : clipboardPeerID
+        files?.configure(enabled: enabled && clipboardEnabled && clipboardFilesEnabled && channelAllowsSharing, selected: peer, rate: fileRateMiB)
         clipboard?.configure(enabled: enabled && clipboardEnabled && channelAllowsSharing, images: clipboardImagesEnabled,
             selected: clipboardPeerID.isEmpty ? nil : clipboardPeerID, paired: settings.peers.map(\.id))
     }
@@ -160,6 +165,8 @@ import ServiceManagement
         }
         settings.save()
         self.settings = settings
+        clipboardFilesEnabled = settings.clipboardFilesEnabled
+        fileRateMiB = settings.fileRateMiB
         clipboardImagesEnabled = settings.clipboardImagesEnabled
         clipboardEnabled = settings.clipboardEnabled
         clipboardPeerID = settings.clipboardPeerID ?? ""
@@ -182,6 +189,13 @@ import ServiceManagement
         server.displayName = { MainActor.assumeIsolated { AppController.shared.macName } }
         capture = InputCapture(settings: settings)
         clipboard = MacClipboardSync(server: server, keyFor: { [unowned self] id in self.settings.peers.first { $0.id == id }?.pairingKey })
+        files = MacFileTransfer(server: server, keyFor: { [unowned self] id in self.settings.peers.first { $0.id == id }?.pairingKey })
+        clipboard.onLocalClipboardChanged = { [weak self] in self?.files.localClipboardChanged() }
+        clipboard.onFilesCopied = { [weak self] in self?.files.offer($0, clipboard: true) }
+        clipboard.onRemoteClipboardWritten = { [weak self] in self?.files.remoteClipboardWritten() }
+        files.onClipboardWritten = { [weak self] in self?.clipboard.markRemoteFileWrite() }
+        files.canReplayPaste = { [weak self] in self?.capture.published.mode == .local }
+        capture.filePaste = { [weak self] in self?.files.tryPaste() ?? false }
         clipboard.onStatus = { [weak self] in self?.clipboardStatus = $0 }
         wire()
         refreshClipboard()
@@ -361,7 +375,7 @@ import ServiceManagement
         if AppUpdater.shared.installOnQuit() { return }
         hidpp.restore()
         capture.uninstall()
-        clipboard.stop()
+        clipboard.stop(); files.cancel()
         server.stop()
         NSApp.terminate(nil)
     }
@@ -369,6 +383,7 @@ import ServiceManagement
     // MARK: Wiring
 
     private func wire() {
+        server.onFileConnection = { [weak self] in self?.files.accept($0) }
         server.onClipboardConnection = { [weak self] in self?.clipboard.accept($0) }
         server.keyFor = { [unowned self] id in
             settings.peers.first { $0.id == id }?.pairingKey
@@ -386,7 +401,7 @@ import ServiceManagement
         }
 
         server.onConnected = { [unowned self] id, name in
-            clipboard.connected(id)
+            clipboard.connected(id); files.connected(id)
             lastPong[id] = Date()
             quality.connected(id)
             if let i = settings.peers.firstIndex(where: { $0.id == id }), settings.peers[i].name != name {
@@ -405,7 +420,7 @@ import ServiceManagement
             }
         }
         server.onDisconnected = { [unowned self] id, reason in
-            clipboard.disconnected(id)
+            clipboard.disconnected(id); files.disconnected(id)
             latency[id] = nil
             sentTips[id] = nil
             refreshDevices()
@@ -935,6 +950,8 @@ import ServiceManagement
     private func handle(_ data: Data, from id: String) {
         var reader = MessageReader(data)
         switch reader.type {
+        case .fileCapabilities, .fileCommand:
+            files.control(data, from: id)
         case .clipboardCapabilities, .clipboardImageCapabilities:
             clipboard.control(data, from: id)
         case .leave:

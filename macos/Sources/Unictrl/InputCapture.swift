@@ -27,6 +27,7 @@ final class InputCapture {
     /// The state as last published to the main thread; read it only there.
     private(set) var published = State()
     /// Called on the main thread after the state changes.
+    var filePaste: () -> Bool = { false }
     var onStateChange: (State) -> Void = { _ in }
     /// Sends to a peer; called on the tap thread (and the scroll queue), so it must be thread-safe.
     var send: (_ peer: String, MessageWriter) -> Void = { _, _ in }
@@ -343,6 +344,11 @@ final class InputCapture {
             return pass
         }
 
+        if mode == .local, type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 9,
+           event.flags.contains(.maskCommand), !event.flags.contains(.maskShift), !event.flags.contains(.maskAlternate),
+           event.getIntegerValueField(.eventSourceUserData) != MacFileTransfer.pasteTag, filePaste() {
+            swallowKeyUp.insert(9); return nil
+        }
         if Date() < identifyKeysUntil { logSpecialKey(type, event) }
         if let result = handleKeyboardMacro(type, event) { return result }
         if mode == .local {
