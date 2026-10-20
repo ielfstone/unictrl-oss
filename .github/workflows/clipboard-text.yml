@@ -1,0 +1,36 @@
+name: Text clipboard Windows build
+on:
+  push:
+    branches: [feature/clipboard-text]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test, build, verify native clipboard, package
+        shell: pwsh
+        run: ./tools/windows/build-portable.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Unictrl-0.2.0-windows-x64-portable
+          path: |
+            artifacts/Unictrl-0.2.0-windows-x64-portable.zip
+            artifacts/Unictrl-0.2.0-windows-x64-portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clipboard-test-results
+          path: artifacts/windows-tests/**
+          if-no-files-found: ignore
+          retention-days: 14

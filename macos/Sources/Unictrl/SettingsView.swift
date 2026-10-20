@@ -81,6 +81,16 @@ struct SettingsView: View {
 
             QualitySection(quality: controller.quality, devices: controller.devices)
 
+            Section("Shared text clipboard") {
+                Toggle("Share text clipboard", isOn: $controller.clipboardEnabled)
+                Picker("Windows PC", selection: $controller.clipboardPeerID) {
+                    Text("Automatic (one paired PC)").tag("")
+                    ForEach(controller.devices) { Text($0.name).tag($0.id) }
+                }
+                Text(controller.clipboardStatus).font(.caption).foregroundStyle(.secondary)
+                Text("Enable on both computers. New plain text only, up to 1 MiB. Images and files are planned for later versions.").font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("General") {
                 Toggle("Share this Mac’s keyboard and mouse", isOn: $controller.enabled)
                 Picker(selection: $controller.shareChannel) {

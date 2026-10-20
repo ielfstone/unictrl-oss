@@ -42,6 +42,12 @@ public partial class App : Application
     /// Command-line checks used during development: --discover-test, --pair-test host port code.
     private static bool RunDiagnostic(string[] args)
     {
+        if (args.Contains("--clipboard-test"))
+        {
+            try { ClipboardSelfTest.Run(); }
+            catch (Exception error) { Environment.ExitCode = 1; Log.Write("clipboard_test_failed", error.GetType().Name + ": " + error.Message); }
+            return true;
+        }
         if (args.Contains("--discover-test"))
         {
             var macs = Discovery.Find(TimeSpan.FromSeconds(2));

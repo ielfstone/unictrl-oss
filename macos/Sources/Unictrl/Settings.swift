@@ -27,6 +27,8 @@ struct UnictrlSettings: Codable {
     var pcPointerScale = 1.0
     /// Scales scrolling sent to PCs; `scrollScale` is the Mac's own.
     var pcScrollScale = 1.0
+    var clipboardEnabled = false
+    var clipboardPeerID: String?
     var enabled = true
     /// Share only while the keyboard (or, without it, the mouse) is on this Easy-Switch channel
     /// (0-based); nil = on any. Other channels are for using the devices on one computer only.
@@ -52,7 +54,7 @@ struct UnictrlSettings: Codable {
         .appendingPathComponent("Unictrl/settings.json")
 
     private enum CodingKeys: String, CodingKey {
-        case pcPointerScale, pcScrollScale, shareChannel, readySound, readySoundName
+        case pcPointerScale, pcScrollScale, shareChannel, readySound, readySoundName, clipboardEnabled, clipboardPeerID
         case peers, arrangement, pairingKey, deviceID, port, peerSide, verticalOffsetMm, invertScroll, scrollScale,
              reverseMouseWheel, smoothScrolling, pointerMode, enabled, sleepHandoff, showMenuBarIcon, showDockIcon,
              macAlias, loginItemConfigured, diagnostics
@@ -79,6 +81,8 @@ struct UnictrlSettings: Codable {
         shareChannel = try c.decodeIfPresent(Int.self, forKey: .shareChannel)
         readySound = try c.decodeIfPresent(Bool.self, forKey: .readySound) ?? true
         readySoundName = try c.decodeIfPresent(String.self, forKey: .readySoundName) ?? "Glass"
+        clipboardEnabled = try c.decodeIfPresent(Bool.self, forKey: .clipboardEnabled) ?? false
+        clipboardPeerID = try c.decodeIfPresent(String.self, forKey: .clipboardPeerID)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         sleepHandoff = try c.decodeIfPresent(Bool.self, forKey: .sleepHandoff) ?? true
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true

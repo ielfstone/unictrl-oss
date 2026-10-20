@@ -99,8 +99,18 @@ import ServiceManagement
             settings.save()
             if !enabled { capture.returnLocal(yMm: nil, reason: "disabled") }
             pushTargets()
+            refreshClipboard()
             Log.write("enabled_changed", "\(enabled)")
         }
+    }
+
+    @Published var clipboardEnabled: Bool { didSet { settings.clipboardEnabled = clipboardEnabled; settings.save(); refreshClipboard() } }
+    @Published var clipboardPeerID: String { didSet { settings.clipboardPeerID = clipboardPeerID.isEmpty ? nil : clipboardPeerID; settings.save(); refreshClipboard() } }
+    @Published private(set) var clipboardStatus = "Off"
+    private var clipboard: MacClipboardSync!
+    private func refreshClipboard() {
+        clipboard?.configure(enabled: enabled && clipboardEnabled && channelAllowsSharing,
+            selected: clipboardPeerID.isEmpty ? nil : clipboardPeerID, paired: settings.peers.map(\.id))
     }
 
     private var settings: UnictrlSettings
@@ -149,6 +159,8 @@ import ServiceManagement
         }
         settings.save()
         self.settings = settings
+        clipboardEnabled = settings.clipboardEnabled
+        clipboardPeerID = settings.clipboardPeerID ?? ""
         enabled = settings.enabled
         reverseMouseWheel = settings.reverseMouseWheel
         smoothScrolling = settings.smoothScrolling
@@ -167,7 +179,10 @@ import ServiceManagement
         server.deviceID = UUID(uuidString: settings.deviceID)!
         server.displayName = { MainActor.assumeIsolated { AppController.shared.macName } }
         capture = InputCapture(settings: settings)
+        clipboard = MacClipboardSync(server: server, keyFor: { [unowned self] id in self.settings.peers.first { $0.id == id }?.pairingKey })
+        clipboard.onStatus = { [weak self] in self?.clipboardStatus = $0 }
         wire()
+        refreshClipboard()
         refreshDevices()
         start()
     }
@@ -343,6 +358,7 @@ import ServiceManagement
     func quit() {
         hidpp.restore()
         capture.uninstall()
+        clipboard.stop()
         server.stop()
         NSApp.terminate(nil)
     }
@@ -350,6 +366,7 @@ import ServiceManagement
     // MARK: Wiring
 
     private func wire() {
+        server.onClipboardConnection = { [weak self] in self?.clipboard.accept($0) }
         server.keyFor = { [unowned self] id in
             settings.peers.first { $0.id == id }?.pairingKey
         }
@@ -366,6 +383,7 @@ import ServiceManagement
         }
 
         server.onConnected = { [unowned self] id, name in
+            clipboard.connected(id)
             lastPong[id] = Date()
             quality.connected(id)
             if let i = settings.peers.firstIndex(where: { $0.id == id }), settings.peers[i].name != name {
@@ -384,6 +402,7 @@ import ServiceManagement
             }
         }
         server.onDisconnected = { [unowned self] id, reason in
+            clipboard.disconnected(id)
             latency[id] = nil
             sentTips[id] = nil
             refreshDevices()
@@ -499,6 +518,7 @@ import ServiceManagement
         }
         if list != devices { devices = list }
         updateEasySwitchNote()
+        refreshClipboard()
     }
 
     private func arrangementMessage(for id: String) -> ArrangementMessage {
@@ -852,6 +872,7 @@ import ServiceManagement
             loggedSharing = channelAllowsSharing
             Log.write(channelAllowsSharing ? "sharing_resumed" : "sharing_paused", statusLine)
         }
+        refreshClipboard()
         if !channelAllowsSharing { capture.returnLocal(yMm: nil, reason: "channel") }
         pushTargets()
         objectWillChange.send()
@@ -911,6 +932,8 @@ import ServiceManagement
     private func handle(_ data: Data, from id: String) {
         var reader = MessageReader(data)
         switch reader.type {
+        case .clipboardCapabilities:
+            clipboard.control(data, from: id)
         case .leave:
             guard let current = capture.published.remote, current.id == id else { break }
             let yMm = reader.f32().map(Double.init)

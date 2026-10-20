@@ -3,6 +3,9 @@ import Foundation
 
 /// Message types. See docs/PROTOCOL.md; the Windows receiver mirrors these values.
 enum MessageType: UInt8 {
+    case clipboardCapabilities = 0x30 // u8 version=1, u8 enabled
+    case clipboardTicket = 0x31       // one-use 16-byte grant, control connection only
+    case clipboardData = 0x33         // text-v1 JSON on the independent encrypted connection
     case hello = 0x01
     case screen = 0x02  // receiver -> sender: f32 widthMm, f32 heightMm of the screen the pointer enters
     case arrangement = 0x03     // sender -> receiver (v2): JSON ArrangementMessage, all screens left to right
@@ -91,15 +94,15 @@ final class SecureChannel {
     private var sendCounter: UInt64 = 0
     private var receiveCounter: UInt64 = 0
 
-    init(pairingKey: String, clientSalt: Data, serverSalt: Data, isServer: Bool) {
+    init(pairingKey: String, clientSalt: Data, serverSalt: Data, isServer: Bool, context: String = "unictrl v1") {
         let ikm = SymmetricKey(data: Data(pairingKey.utf8))
         let salt = clientSalt + serverSalt
         func derive(_ label: String) -> SymmetricKey {
             HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: salt,
                                    info: Data(label.utf8), outputByteCount: 32)
         }
-        let c2s = derive("unictrl v1 client->server")
-        let s2c = derive("unictrl v1 server->client")
+        let c2s = derive("\(context) client->server")
+        let s2c = derive("\(context) server->client")
         sendKey = isServer ? s2c : c2s
         receiveKey = isServer ? c2s : s2c
     }

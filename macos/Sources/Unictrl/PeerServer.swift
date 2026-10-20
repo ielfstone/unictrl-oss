@@ -7,6 +7,7 @@ import Security
 /// and replaces that PC's session only once it has proven its key, so stray or failed connections
 /// never interrupt the pointer. Callbacks run on the main queue.
 final class PeerServer {
+    var onClipboardConnection: ((NWConnection) -> Void)?
     var onConnected: ((_ peer: String, _ name: String) -> Void)?
     var onDisconnected: ((_ peer: String, _ reason: String) -> Void)?
     var onMessage: ((_ peer: String, Data) -> Void)?
@@ -51,6 +52,7 @@ final class PeerServer {
 
     init(settings: UnictrlSettings) { port = settings.port }
 
+    var boundPort: UInt16? { listener?.port?.rawValue }
     func isConnected(_ peer: String) -> Bool { session(peer) != nil }
     var connectedPeers: [String] { Array(sessions.keys) }
     func isModern(_ peer: String) -> Bool { session(peer)?.modern ?? false }
@@ -112,6 +114,8 @@ final class PeerServer {
         connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { [weak self] data, _, _, _ in
             guard let self else { return }
             switch data {
+            case MacClipboardSync.magic?:
+                if let accept = self.onClipboardConnection { accept(connection) } else { connection.cancel() }
             case Self.sessionV1?: readSession(session, withID: false)
             case Self.sessionV2?: readSession(session, withID: true)
             case Pairing.magic?: readPairing(session, withID: false)

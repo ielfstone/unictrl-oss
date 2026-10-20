@@ -109,7 +109,8 @@ internal sealed class Tray : IDisposable
         Native.AppendMenuW(menu, MfString, CmdOpen, "Open Unictrl");
         Native.AppendMenuW(menu, MfSeparator, 0, null);
         Native.AppendMenuW(menu, MfString | (IsEnabled() ? MfChecked : 0), CmdEnabled, "Enabled");
-        Native.AppendMenuW(menu, MfString | (StartsAtLogin() ? MfChecked : 0), CmdStartAtLogin, "Start at login");
+        if (!Settings.IsPortable)
+            Native.AppendMenuW(menu, MfString | (StartsAtLogin() ? MfChecked : 0), CmdStartAtLogin, "Start at login");
         Native.AppendMenuW(menu, MfSeparator, 0, null);
         Native.AppendMenuW(menu, MfString, CmdQuit, "Quit Unictrl");
         Native.GetCursorPos(out var at);

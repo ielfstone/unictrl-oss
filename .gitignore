@@ -12,3 +12,6 @@ settings.json
 *.pfx
 __pycache__/
 *.pyc
+
+.build-*/
+artifacts/

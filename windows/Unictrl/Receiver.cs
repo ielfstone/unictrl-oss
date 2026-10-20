@@ -10,6 +10,7 @@ namespace Unictrl;
 internal sealed class Receiver : IDisposable
 {
     private readonly Settings settings;
+    private readonly ClipboardSync? clipboard;
     private readonly Injector injector;
     private readonly Action<string> status;
     private readonly CancellationTokenSource lifetime = new();
@@ -52,9 +53,10 @@ internal sealed class Receiver : IDisposable
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
     }
 
-    public Receiver(Settings settings, Action<string> status)
+    public Receiver(Settings settings, Action<string> status, ClipboardSync? clipboard = null)
     {
         this.settings = settings;
+        this.clipboard = clipboard;
         this.status = status;
         injector = new Injector(settings);
     }
@@ -95,6 +97,7 @@ internal sealed class Receiver : IDisposable
             catch { }
             finally
             {
+                clipboard?.Detach(this);
                 send = null;
                 if (Arrangement is not null)
                 {
@@ -208,6 +211,7 @@ internal sealed class Receiver : IDisposable
                 Connected?.Invoke();
                 if (string.IsNullOrEmpty(settings.MacId)) Task.Run(LearnMacId);
                 send = Send;
+                clipboard?.Attach(this, Send);
                 continue;
             }
             Dispatch(ref reader, Send, arrivalUs);
@@ -220,6 +224,9 @@ internal sealed class Receiver : IDisposable
     {
         switch (reader.Type)
         {
+            case MessageType.ClipboardCapabilities or MessageType.ClipboardTicket:
+                clipboard?.Control(this, reader.Type, reader.Rest());
+                break;
             case MessageType.Enter when reader.Has(4):
                 var entryMm = reader.F32();
                 var edge = reader.Has(1) ? (ScreenEdge)reader.U8() : ScreenEdge.Left;

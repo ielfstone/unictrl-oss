@@ -8,10 +8,11 @@ internal static class AutoStart
 {
     private const string TaskName = "Unictrl";
 
-    public static bool IsEnabled() => Schtasks($"/query /tn {TaskName}") == 0;
+    public static bool IsEnabled() => !Settings.IsPortable && Schtasks($"/query /tn {TaskName}") == 0;
 
     public static bool Enable()
     {
+        if (Settings.IsPortable) return false;
         var exe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Unictrl.exe");
         var ok = Schtasks($"/create /tn {TaskName} /tr \"\\\"{exe}\\\" --background\" /sc onlogon /rl highest /it /delay 0000:05 /f") == 0;
         Log.Write("autostart_enable", $"ok={ok}");
@@ -20,6 +21,7 @@ internal static class AutoStart
 
     public static bool Disable()
     {
+        if (Settings.IsPortable) return false;
         var ok = Schtasks($"/delete /tn {TaskName} /f") == 0;
         Log.Write("autostart_disable", $"ok={ok}");
         return ok;

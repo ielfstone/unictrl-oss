@@ -13,6 +13,7 @@ namespace Unictrl;
 public sealed partial class MainWindow : Window
 {
     private readonly Settings settings = Settings.Load();
+    private readonly ClipboardSync clipboard;
     private readonly Tray tray;
     private Receiver? receiver;
     private bool quitting;
@@ -22,6 +23,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text));
+        ClipboardSwitch.IsOn = settings.ClipboardEnabled;
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "Unictrl.ico");
         AppWindow.SetIcon(icon);
         ExtendsContentIntoTitleBar = true;
@@ -45,6 +48,7 @@ public sealed partial class MainWindow : Window
         ShowKeyboardDetail();
         RestoreDetails();
         StartAtLoginSwitch.IsOn = settings.StartAtLogin;
+        StartAtLoginSwitch.IsEnabled = !Settings.IsPortable;
         AboutText.Text = $"Unictrl {typeof(App).Assembly.GetName().Version?.ToString(3)} · This PC: {Environment.MachineName}";
         ShowPairing(string.IsNullOrEmpty(settings.PairingKey));
         UpdateDetail();
@@ -70,7 +74,7 @@ public sealed partial class MainWindow : Window
             if (settings.ShowInTaskbar && AppWindow.Presenter is OverlappedPresenter overlapped) overlapped.Minimize();
             else AppWindow.Hide();
         };
-        Closed += (_, _) => { receiver?.Dispose(); tray.Dispose(); };
+        Closed += (_, _) => { receiver?.Dispose(); clipboard.Dispose(); tray.Dispose(); };
 
         if (settings.Enabled) StartReceiver(); else SetStatus("Paused");
         Task.Run(() =>
@@ -169,6 +173,7 @@ public sealed partial class MainWindow : Window
         quitting = true;
         CursorHider.Show("quit");
         receiver?.Dispose();
+        clipboard.Dispose();
         tray.Dispose();
         Application.Current.Exit();
     }
@@ -208,10 +213,17 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private void OnClipboardToggled(object sender, RoutedEventArgs e)
+    {
+        if (settings.ClipboardEnabled == ClipboardSwitch.IsOn) return;
+        settings.ClipboardEnabled = ClipboardSwitch.IsOn; settings.Save(); clipboard.Refresh();
+    }
+
     private void OnEnabledToggled(object sender, RoutedEventArgs e)
     {
         if (settings.Enabled == EnabledSwitch.IsOn) return;
         settings.Enabled = EnabledSwitch.IsOn;
+        clipboard.Refresh();
         settings.Save();
         receiver?.Dispose();
         receiver = null;
@@ -228,7 +240,7 @@ public sealed partial class MainWindow : Window
             SetStatus("Not paired yet");
             return;
         }
-        var next = new Receiver(settings, SetStatus);
+        var next = new Receiver(settings, SetStatus, clipboard);
         next.MacChanged += () => DispatcherQueue.TryEnqueue(UpdateDetail);
         next.ArrangementChanged += info => DispatcherQueue.TryEnqueue(() =>
         {

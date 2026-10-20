@@ -7,6 +7,9 @@ namespace Unictrl;
 /// Message types; mirrors macos/Sources/Unictrl/Wire.swift and docs/PROTOCOL.md.
 internal enum MessageType : byte
 {
+    ClipboardCapabilities = 0x30,
+    ClipboardTicket = 0x31,
+    ClipboardData = 0x33,
     Hello = 0x01,
     Screen = 0x02,
     Arrangement = 0x03,
@@ -46,14 +49,14 @@ internal sealed class SecureChannel : IDisposable
     private ulong sendCounter;
     private ulong receiveCounter;
 
-    public SecureChannel(string pairingKey, byte[] clientSalt, byte[] serverSalt, bool isServer)
+    public SecureChannel(string pairingKey, byte[] clientSalt, byte[] serverSalt, bool isServer, string context = "unictrl v1")
     {
         var ikm = Encoding.UTF8.GetBytes(pairingKey);
         var salt = clientSalt.Concat(serverSalt).ToArray();
         byte[] Derive(string label) =>
             HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 32, salt, Encoding.UTF8.GetBytes(label));
-        var c2s = Derive("unictrl v1 client->server");
-        var s2c = Derive("unictrl v1 server->client");
+        var c2s = Derive(context + " client->server");
+        var s2c = Derive(context + " server->client");
         sendKey = new AesGcm(isServer ? s2c : c2s, 16);
         receiveKey = new AesGcm(isServer ? c2s : s2c, 16);
     }

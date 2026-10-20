@@ -6,6 +6,7 @@ internal static class StartMenuShortcut
 {
     public static void Ensure()
     {
+        if (Settings.IsPortable) return;
         try
         {
             var target = Environment.ProcessPath;
