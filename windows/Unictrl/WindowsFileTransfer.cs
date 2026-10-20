@@ -20,7 +20,7 @@ internal sealed class WindowsFileTransfer : IDisposable
     private readonly Dictionary<string, FileOffer> offers = new();
     private sealed record Source(FileOffer Offer, string[] Paths, DateTime[] Dates, DateTime Created);
     private sealed record Paste(uint Sequence, nint Window, long Intent);
-    private long clipboardIntent;
+    private long clipboardIntent, connectionGeneration;
     private CancellationTokenSource? transfer;
     private string? activeId, pasteId, pendingRequest;
     private uint pasteSequence;
@@ -79,9 +79,9 @@ internal sealed class WindowsFileTransfer : IDisposable
                     if(source is not null && DateTime.UtcNow-source.Created>TimeSpan.FromMinutes(30))return;
                     var selectedOffer=source?.Offer??incoming!;
                     busy=true;activeId=ticketId;transfer?.Cancel();transfer?.Dispose();transfer=new();
-                    var cancel=transfer.Token;var paste=pendingPaste;var rate=FileProtocol.Rate(settings.FileRateMiB,command.Rate??10);
+                    var cancel=transfer.Token;var current=++connectionGeneration;var paste=pendingPaste;var rate=FileProtocol.Rate(settings.FileRateMiB,command.Rate??10);
                     Report("Connecting file transfer…");
-                    _=Task.Run(()=>Run(ticket,selectedOffer,source,rate,paste,cancel));break;
+                    _=Task.Run(()=>Run(ticket,selectedOffer,source,rate,paste,current,cancel));break;
                 case "withdraw":
                     if(command.Id is not {} withdrawn)return;
                     offers.Remove(withdrawn);if(pasteId==withdrawn){Interlocked.Increment(ref clipboardIntent);pasteId=null;pasteScheduled=false;}
@@ -139,10 +139,10 @@ internal sealed class WindowsFileTransfer : IDisposable
     {
         if(!Ready||busy||paste is not null&&paste.Intent!=Volatile.Read(ref clipboardIntent)){pasteScheduled=false;return;}
         busy=true;activeId=offer.Id;pendingPaste=paste;pendingRequest=Guid.NewGuid().ToString("D").ToUpperInvariant();Send(new("request",Id:offer.Id,Rate:settings.FileRateMiB,Request:pendingRequest));Report("Requesting files…");
-        var id=activeId;
-        _=Task.Delay(10000).ContinueWith(_=>{lock(gate){if(activeId==id&&transfer is null){busy=false;activeId=null;pasteScheduled=false;Report("File connection timed out; try Receive again");}}});
+        var id=activeId;var request=pendingRequest;
+        _=Task.Delay(10000).ContinueWith(_=>{lock(gate){if(activeId==id&&pendingRequest==request&&transfer is null){busy=false;activeId=null;pasteScheduled=false;Report("File connection timed out; try Receive again");}}});
     }
-    private async Task Run(byte[] ticket,FileOffer offer,Source? source,int rate,Paste? paste,CancellationToken cancel)
+    private async Task Run(byte[] ticket,FileOffer offer,Source? source,int rate,Paste? paste,long current,CancellationToken cancel)
     {
         try
         {
@@ -163,14 +163,14 @@ internal sealed class WindowsFileTransfer : IDisposable
             void Progress(long count)
             {
                 if(notifyAt.ElapsedMilliseconds<200)return;notifyAt.Restart();
-                lock(gate){if(activeId==offer.Id)Report($"{(source is null?"Receiving":"Sending")} files · {(offer.Size==0?100:count*100/offer.Size)}%",offer.Size==0?1:(double)count/offer.Size);}
+                lock(gate){if(activeId==offer.Id&&current==connectionGeneration)Report($"{(source is null?"Receiving":"Sending")} files · {(offer.Size==0?100:count*100/offer.Size)}%",offer.Size==0?1:(double)count/offer.Size);}
             }
             string[] paths=[];
             if(source is not null)await SendFiles(source,stream,cipher,rate,Progress,cancel);
             else paths=await ReceiveFiles(offer,stream,cipher,receiveDirectory,Progress,cancel);
             lock(gate)
             {
-                if(activeId!=offer.Id)return;
+                if(activeId!=offer.Id||current!=connectionGeneration)return;
                 transfer?.Dispose();transfer=null;activeId=null;busy=false;pendingPaste=null;
                 if(paths.Length>0)
                 {
@@ -186,7 +186,7 @@ internal sealed class WindowsFileTransfer : IDisposable
         }
         catch(Exception error)
         {
-            lock(gate){if(activeId!=offer.Id)return;transfer?.Dispose();transfer=null;activeId=null;busy=false;pasteScheduled=false;pendingPaste=null;Report(cancel.IsCancellationRequested?"File transfer cancelled":"File transfer stopped: "+error.Message);}
+            lock(gate){if(activeId!=offer.Id||current!=connectionGeneration)return;transfer?.Dispose();transfer=null;activeId=null;busy=false;pasteScheduled=false;pendingPaste=null;Report(cancel.IsCancellationRequested?"File transfer cancelled":"File transfer stopped: "+error.Message);}
         }
     }
     private static async Task Write(NetworkStream stream,SecureChannel cipher,byte[] data,CancellationToken cancel)
@@ -246,7 +246,7 @@ internal sealed class WindowsFileTransfer : IDisposable
     {
         lock(gate){if(notify&&activeId is {} id){if(sources.Remove(id))Send(new("withdraw",Id:id));Send(new("cancel",Id:id));}ResetTransfer();Report("File transfer cancelled");}
     }
-    private void ResetTransfer(){Interlocked.Increment(ref clipboardIntent);pendingRequest=null;activeId=null;transfer?.Cancel();transfer?.Dispose();transfer=null;busy=false;pendingPaste=null;pasteScheduled=false;}
+    private void ResetTransfer(){connectionGeneration++;Interlocked.Increment(ref clipboardIntent);pendingRequest=null;activeId=null;transfer?.Cancel();transfer?.Dispose();transfer=null;busy=false;pendingPaste=null;pasteScheduled=false;}
     private void Reset(){ResetTransfer();sources.Clear();offers.Clear();pasteId=null;pasteScheduled=false;}
     public void Dispose(){lock(gate){Reset();send=null;}hook.Dispose();}
     [DllImport("user32.dll")]private static extern uint GetClipboardSequenceNumber();

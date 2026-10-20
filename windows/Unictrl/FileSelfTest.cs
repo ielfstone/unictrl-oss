@@ -93,7 +93,9 @@ internal static class FileSelfTest
             else{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);Thread.Sleep(50);Check(!chunkSent.IsSet,"offer must not start data transfer");if(supersede)Check(files.TryPaste(),"native paste starts download");else files.Receive();}
             if(cancelTransfer)
             {
-                Check(chunkSent.Wait(8000),"partial chunk sent");Thread.Sleep(100);files.Cancel();Check(mock.Wait(8000),"cancel closes network");
+                Check(chunkSent.Wait(8000),"partial chunk sent");Thread.Sleep(100);files.Cancel();
+                files.Receive();Thread.Sleep(100);Check(lastState?.Busy==true,"old cancellation cannot reset immediate retry");files.Cancel();
+                Check(mock.Wait(8000),"cancel closes network");
                 for(var i=0;i<100&&Directory.Exists(received)&&Directory.GetFileSystemEntries(received).Length>0;i++)Thread.Sleep(20);
                 Check(!Directory.Exists(received)||Directory.GetFileSystemEntries(received).Length==0,"cancel removes partial files");
             }
