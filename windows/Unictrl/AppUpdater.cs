@@ -8,17 +8,19 @@ internal sealed class AppUpdater : IDisposable
 {
     private readonly Settings settings;
     private readonly Action<UpdateState> status;
-    private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient http;
+    private readonly Version? versionForTest;
+    internal string? DownloadDirectory => work;
     private readonly System.Threading.Timer timer;
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? attempt;
     private int busy;
     private string? staged, work;
-    public AppUpdater(Settings settings, Action<UpdateState> status)
+    public AppUpdater(Settings settings, Action<UpdateState> status, HttpClient? client = null, Version? versionForTest = null, bool enableTimer = true)
     {
-        this.settings = settings; this.status = status;
+        this.settings = settings; this.status = status; this.http = client ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) }; this.versionForTest = versionForTest;
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Unictrl-Personal-Fork");
-        timer = new(_ => { if (settings.AutomaticUpdates) _ = Check(); }, null, TimeSpan.FromSeconds(5), TimeSpan.FromHours(6));
+        timer = new(_ => { if (settings.AutomaticUpdates) _ = Check(); }, null, enableTimer ? TimeSpan.FromSeconds(5) : Timeout.InfiniteTimeSpan, TimeSpan.FromHours(6));
     }
     public void CancelDownload() { try { attempt?.Cancel(); } catch (ObjectDisposedException) { } }
     public async Task Check()
@@ -38,7 +40,7 @@ internal sealed class AppUpdater : IDisposable
             using var memory = new MemoryStream(); var buffer = new byte[65536]; int count;
             while ((count = await feed.ReadAsync(buffer, cancel)) > 0) { if (memory.Length + count > 65536) throw new InvalidDataException("Update manifest too large"); memory.Write(buffer, 0, count); }
             var release = UpdateProtocol.Parse(memory.ToArray());
-            var current = typeof(App).Assembly.GetName().Version!;
+            var current = versionForTest ?? typeof(App).Assembly.GetName().Version!;
             if (UpdateProtocol.VersionOf(release.Version)! <= new Version(current.Major, current.Minor, current.Build)) { result = $"Up to date · {current.ToString(3)}"; return; }
             var asset = Settings.IsPortable ? release.Windows : release.WindowsInstaller ?? throw new InvalidDataException("This release has no Windows installer");
             var installed = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);

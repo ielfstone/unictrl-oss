@@ -5,8 +5,40 @@ using System.Text.Json;
 namespace Unictrl;
 internal static class UpdateSelfTest
 {
+    private sealed class SlowStream : Stream
+    {
+        private bool first = true;
+        public override bool CanRead => true; public override bool CanWrite => false; public override bool CanSeek => false;
+        public override long Length => 3; public override long Position { get => first ? 0 : 1; set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancel = default)
+        { if (first) { first = false; buffer.Span[0] = 1; return 1; } await Task.Delay(Timeout.Infinite, cancel); return 0; }
+        public override int Read(byte[] b, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() { } public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] b, int offset, int count) => throw new NotSupportedException();
+    }
+    private sealed class UpdateFixtureHandler(byte[] fixture) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        {
+            HttpContent content = request.RequestUri!.AbsoluteUri == UpdateProtocol.Feed ? new ByteArrayContent(fixture) : new StreamContent(new SlowStream());
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content });
+        }
+    }
+    private static void CancelDownloadCheck()
+    {
+        using var fixture = typeof(App).Assembly.GetManifestResourceStream("Unictrl.UpdateFixture")!;
+        using var memory = new MemoryStream(); fixture.CopyTo(memory);
+        using var progress = new ManualResetEventSlim(); string? directory = null; UpdateState? last = null; AppUpdater? updater = null;
+        using var client = new HttpClient(new UpdateFixtureHandler(memory.ToArray()));
+        using var service = updater = new AppUpdater(new Settings(), state => { last = state; if (state.Progress > 0) { directory = updater!.DownloadDirectory; progress.Set(); } }, client, new Version(0,0,0), false);
+        var job = Task.Run(service.Check);
+        if (!progress.Wait(5000)) throw new Exception("Update progress missing");
+        service.CancelDownload();
+        if (!job.Wait(5000) || last?.Text != "Download cancelled" || last.CanCancel || directory is null || Directory.Exists(directory)) throw new Exception("Update cancellation left a partial download");
+    }
     public static void Run()
     {
+        CancelDownloadCheck();
         var root = Path.Combine(Path.GetTempPath(), "Unictrl update test " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try

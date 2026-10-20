@@ -12,3 +12,12 @@ Mac 配对多台 PC 时，请在 Windows PC 下拉框选定一台；只有一台
 源代码：https://github.com/ielfstone/unictrl-oss/tree/feature/auto-update
 
 自动更新：启动及每六小时检查此 fork 的稳定发布，后台验签、下载。完成后点 Restart and update，或从托盘菜单退出时自动替换并重启。Data 文件夹与配对保留，旧程序保存在同级 .previous 目录。可在 Software updates 中关闭自动检查。仅更新到本 fork 发布且验签成功的版本。
+
+0.6.0 文件传输与安装版：
+- 推荐下载同版 windows-x64-Setup.exe，首次安装可选旧便携文件夹，导入 Data/settings.json；之后配置在 %LOCALAPPDATA%\Unictrl，升级保留安装路径和配置。
+- 自动更新下载有进度和取消按钮。便携版仍原路径替换，不会自动转为安装版。
+- 登录时启动现已可开关，便携版打开后不要移动程序目录。
+- 两端均升级 0.6.0 并开启 Share files。复制后在对端按 Ctrl+V / ⌘V 触发下载，整批最多 100 MiB。保持目标应用前台，下载后继续粘贴；菜单粘贴请先点 Receive files。
+- 拖拽到剪贴板区域或点 Choose files，对端点 Receive files 后传输；每文件最多 1 GiB、整批 4 GiB、最多 32 文件。目录请先压缩。
+- 默认限速 10 MiB/s，可选 1/5/10/20/50/100，两端较小值生效。可看进度、取消；重试从头开始。
+- 收到的文件在用户 Downloads/Unictrl Received 下，可点 Show received files 或 Copy received files。

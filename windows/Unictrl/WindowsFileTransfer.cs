@@ -16,7 +16,8 @@ internal sealed class WindowsFileTransfer : IDisposable
     private readonly object gate = new();
     private Action<byte[]>? send;
     private bool remoteEnabled, busy;
-    private readonly Dictionary<string, Source> sources = new(), offers = new();
+    private readonly Dictionary<string, Source> sources = new();
+    private readonly Dictionary<string, FileOffer> offers = new();
     private sealed record Source(FileOffer Offer, string[] Paths, DateTime[] Dates, DateTime Created);
     private sealed record Paste(uint Sequence, nint Window);
     private CancellationTokenSource? transfer;

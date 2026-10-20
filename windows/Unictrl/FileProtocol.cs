@@ -96,7 +96,7 @@ internal sealed class FileInbox : IDisposable
     public string[] Complete()
     {
         if(file is not null || index!=offer.Files.Length) throw new InvalidDataException("Incomplete file transfer");
-        Directory.Move(Path.Combine(partial,"ready"),finished); Directory.Delete(partial,true); committed=true; return offer.Files.Select(f=>Path.Combine(finished,f.Name)).ToArray();
+        Directory.Move(Path.Combine(partial,"ready"),finished); committed=true; try{Directory.Delete(partial,true);}catch{} return offer.Files.Select(f=>Path.Combine(finished,f.Name)).ToArray();
     }
     public void Dispose(){file?.Dispose(); hash?.Dispose(); if(!committed){try{Directory.Delete(partial,true);}catch{}}}
 }

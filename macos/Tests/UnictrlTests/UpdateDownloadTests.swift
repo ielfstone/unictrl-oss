@@ -18,10 +18,12 @@ private final class UpdateFixtureProtocol: URLProtocol, @unchecked Sendable {
 @Suite(.serialized) struct UpdateDownloadTests {
     private func configuration() -> URLSessionConfiguration { let c = URLSessionConfiguration.ephemeral; c.protocolClasses = [UpdateFixtureProtocol.self]; return c }
     @Test func boundedDownloadWritesDiskAndReportsProgress() async throws {
-        let download = UpdateDownload(expected: 65536, configuration: configuration()) { _ in }
+        let progress = AsyncStream<Double>.makeStream()
+        let download = UpdateDownload(expected: 65536, configuration: configuration()) { progress.continuation.yield($0) }
         let result = try await download.download(URLRequest(url: URL(string: "https://fixture.invalid/update")!))
         defer { try? FileManager.default.removeItem(at: result) }
         #expect(try Data(contentsOf: result) == Data(repeating: 42, count: 65536))
+        for await fraction in progress.stream { #expect(fraction == 1); break }; progress.continuation.finish()
     }
     @Test func cancelDuringDownloadRemovesPartialFile() async throws {
         let progress = AsyncStream<Double>.makeStream()

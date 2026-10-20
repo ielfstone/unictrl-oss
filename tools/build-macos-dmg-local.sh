@@ -47,11 +47,14 @@ Unictrl 0.6.0 — macOS 通用版（Apple 芯片和 Intel）
 兼容 Windows 图片剪贴板版 0.4.0 及以上。0.6.0 修复 Mac 截图同时带文件标记时无法同步的问题。
 在两端设置中开启 Share text clipboard，均显示 Ready 后重新复制文字，再在另一台粘贴。
 图片需在两端另行开启 Share images too，支持单张静态图/截图（PNG 10 MiB、2000 万像素），约限速 1 MiB/s。
-纯文本最多 UTF-8 1 MiB；等待 Ready 后粘贴，只传新复制内容，不传文件或旧剪贴板。保留原有配对，不需要重新配对。
+纯文本最多 UTF-8 1 MiB；等待 Ready 后粘贴，只传新复制内容。保留原有配对。
+文件需两端均为 0.6.0 并开启 Share files。复制/粘贴整批限 100 MiB；在对端按 Ctrl+V / ⌘V 后下载，目标应用保持前台则完成后继续粘贴。
+拖拽或选择文件每个限 1 GiB、整批 4 GiB，最多 32 个，对端点 Receive files 后才传数据。文件夹请先压缩。
+限速默认 10 MiB/s，可调 1–100 MiB/s，双方较低值生效，可看进度和取消。接收至 Downloads/Unictrl Received，不覆盖旧文件。
 Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在 Mac 上方”。
 支持拖动任意屏幕并吸附到上下左右四个方向。
 
-自动更新：启动及每六小时后台检查、验签和下载。完成后点 Restart and update，或从软件菜单退出时自动安装并重启。旧程序保留 .previous 备份，配对与设置保留。
+自动更新：启动及每六小时后台检查、验签和下载，可显示进度和取消下载。完成后点 Restart and update，或从软件菜单退出时自动安装并重启。旧程序保留 .previous 备份，配对与设置保留。
 
 首次使用：
 1. 在“系统设置 > 隐私与安全性 > 辅助功能”中允许 Unictrl。
@@ -66,7 +69,7 @@ Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在
 未安装完整 Xcode 时使用项目自带的 ICNS 图标。
 应用上游默认启用“登录时启动”，可以在 Unictrl 设置中关闭。
 
-源码：https://github.com/ielfstone/unictrl-oss/tree/fix/mac-image-clipboard
+源码：https://github.com/ielfstone/unictrl-oss/tree/feature/clipboard-files
 上游版本：v0.1.0；本地版本：0.6.0
 布局基线：db181b7e0ec03ed271dac5ed6df90b92c4d8b745
 许可证：GPL-3.0；完整许可证见 LICENSE.txt。

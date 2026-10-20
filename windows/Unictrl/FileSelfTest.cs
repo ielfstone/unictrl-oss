@@ -26,7 +26,7 @@ internal static class FileSelfTest
                 DeviceId=Guid.NewGuid().ToString("D"),MacAddress="127.0.0.1",Port=((IPEndPoint)listener.LocalEndpoint).Port,PairingKey="ci-files-not-a-real-key"};
             var ticket=Enumerable.Repeat((byte)7,16).ToArray();
             var offer=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),"drop",[new("source.bin",small.Length)]);
-            using var finished=new ManualResetEventSlim();using var chunkSent=new ManualResetEventSlim();
+            string? failure=null;using var finished=new ManualResetEventSlim();using var chunkSent=new ManualResetEventSlim();
             using var desktop=new DesktopClipboard(_=>{},_=>{});
             WindowsFileTransfer? service=null;
             var mock=Task.Run(async ()=>{
@@ -66,7 +66,7 @@ internal static class FileSelfTest
                     Send(stream,cipher,new("complete",Id:offer.Id));Check(FileProtocol.Decode(Read(stream,cipher)).Kind=="received","native receive acknowledged");
                 }
             });
-            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{if(state.Status is "Files sent" or "Files received · saved in Downloads/Unictrl Received")finished.Set();},received);
+            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{if(state.Status.StartsWith("File transfer stopped:",StringComparison.Ordinal)){failure=state.Status;finished.Set();}if(state.Status is "Files sent" or "Files received · saved in Downloads/Unictrl Received")finished.Set();},received);
             files.Attach(data=>{
                 if(data[0]==0x34){filesControl(MessageType.FileCapabilities,[1,1]);return;}
                 var command=FileProtocol.Decode(data);
@@ -84,7 +84,7 @@ internal static class FileSelfTest
             }
             else
             {
-                Check(finished.Wait(90000),"file transport completed");Check(mock.Wait(8000),"peer completed");mock.GetAwaiter().GetResult();
+                Check(finished.Wait(90000),"file transport completed");Check(failure is null,failure??"file transport failed");Check(mock.Wait(8000),"peer completed");mock.GetAwaiter().GetResult();
                 if(!fromWindows){var path=Directory.GetFiles(received,"source.bin",SearchOption.AllDirectories).Single();Check(File.ReadAllBytes(path).SequenceEqual(small),"Mac to Windows received bytes");}
             }
         }
