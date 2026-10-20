@@ -64,6 +64,6 @@ internal static class PanelSelfTest
     private static void Finish(Exception? error)
     {
         if (error is not null) { Environment.ExitCode = 1; Log.Write("panel_test_failed", error.GetType().Name + ": " + error.Message); }
-        files?.Dispose(); desktop?.Dispose(); Application.Current.Exit();
+        panel?.ClosePanel(); files?.Dispose(); desktop?.Dispose(); Application.Current.Exit();
     }
 }

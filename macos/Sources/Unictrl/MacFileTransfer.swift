@@ -91,14 +91,15 @@ final class MacFileTransfer: ObservableObject {
     func dismissNotice() { notice = "" }
     private func writeIntent() {
         board.clearContents(); board.setString(marker, forType: Self.markerType); onClipboardWritten?()
+        pasteLock.withLock { if pasteID != nil { pasteCount = board.changeCount } }
     }
     func clearHistory() { historyStore.clear(); history = [] }
     func cleanCache(all: Bool = false) {
         guard !busy else { return }
         historyStore.cleanCache(all: all)
-        if receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
-            receivedURLs = []
-            if isRemoteFileClipboard { writeIntent(); attention("Temporary clipboard files expired. Copy the files again, or use the transfer panel.") }
+        if receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) { receivedURLs = [] }
+        if isRemoteFileClipboard, let paths = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], paths.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
+            writeIntent(); attention("Temporary clipboard files expired. Copy the files again, or use the transfer panel.")
         }
     }
     private func record(_ offer: FileOffer, sent: Bool, result: String) {

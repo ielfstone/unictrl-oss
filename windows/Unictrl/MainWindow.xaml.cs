@@ -200,6 +200,7 @@ public sealed partial class MainWindow : Window
     {
         if (updater.Install(Quit)) return;
         quitting = true;
+        quickPanel?.ClosePanel();
         updater.Dispose();
         CursorHider.Show("quit");
         receiver?.Dispose();

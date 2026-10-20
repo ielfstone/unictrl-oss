@@ -23,7 +23,27 @@ internal sealed class DesktopClipboard : IDisposable
     public Action? RemoteFilesChanged { get; set; }
     public void BeforeRemoteFileCommand(Action action) => Post(() => { Poll(); action(); });
     private bool imagesAllowed, ownFileClipboard;
-    public void ClearRemoteFiles(Func<bool> current) => Post(() => { Poll(); if (ownFileClipboard && current()) Write(new ClipboardContent(FileIntent:"clear"), current); });
+    public void ClearRemoteFiles(Func<bool> current, bool expiredOnly = false) => Post(() => {
+        Poll();
+        if (!ownFileClipboard || !current()) return;
+        if (expiredOnly)
+        {
+            if (!OpenClipboard(window)) return;
+            var expired = false;
+            try
+            {
+                var handle = GetClipboardData(15); var count = DragQueryFileW(handle, uint.MaxValue, null, 0);
+                for (uint i = 0; i < Math.Min(count, 32); i++)
+                {
+                    var path = new StringBuilder(32768); DragQueryFileW(handle, i, path, 32768);
+                    if (!File.Exists(path.ToString())) { expired = true; break; }
+                }
+            }
+            finally { CloseClipboard(); }
+            if (!expired) return;
+        }
+        Write(new ClipboardContent(FileIntent:"clear"), current);
+    });
     private Action? pendingWrite;
     private int writeQueued;
     public DesktopClipboard(Action<ClipboardContent?> copied, Action<string> status)

@@ -19,7 +19,7 @@ internal sealed class QuickPanel : Window
     private readonly Border inbox, drop;
     private readonly ToggleSwitch enabled;
     private readonly Button enableFiles = new() { Content = "Enable file sharing" };
-    private bool picking;
+    private bool picking, closing;
     public QuickPanel(Settings settings, WindowsFileTransfer files, Action openSettings, Action<bool> setEnabled, Action enableSharing, Action quit)
     {
         this.settings = settings; this.files = files; Title = "Unictrl";
@@ -53,7 +53,7 @@ internal sealed class QuickPanel : Window
         var exit = new Button { Content = "Quit" }; exit.Click += (_, _) => quit(); actions.Children.Add(preferences); actions.Children.Add(exit); root.Children.Add(actions);
         Content = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray), Background = (Brush)Application.Current.Resources["ApplicationPageBackgroundThemeBrush"], Child = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
         Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !picking) AppWindow.Hide(); };
-        AppWindow.Closing += (_, e) => { e.Cancel = true; AppWindow.Hide(); };
+        AppWindow.Closing += (_, e) => { if (!closing) { e.Cancel = true; AppWindow.Hide(); } };
         Update(new("Enable files on both computers"));
     }
     private static TextBlock Text(string value, double size, bool bold = false) => new() { Text = value, FontSize = size, TextWrapping = TextWrapping.Wrap, FontWeight = bold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal };
@@ -69,6 +69,7 @@ internal sealed class QuickPanel : Window
         progress.Visibility = cancel.Visibility = state.Busy ? Visibility.Visible : Visibility.Collapsed;
         progress.Value = state.Progress * 100; receive.IsEnabled = !state.Busy; choose.IsEnabled = !state.Busy;
     }
+    public void ClosePanel() { closing = true; Close(); }
     public void Toggle() { if (AppWindow.IsVisible) AppWindow.Hide(); else Show(); }
     public void Show()
     {
