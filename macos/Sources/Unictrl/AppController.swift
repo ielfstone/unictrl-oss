@@ -104,12 +104,13 @@ import ServiceManagement
         }
     }
 
+    @Published var clipboardImagesEnabled: Bool { didSet { settings.clipboardImagesEnabled = clipboardImagesEnabled; settings.save(); refreshClipboard() } }
     @Published var clipboardEnabled: Bool { didSet { settings.clipboardEnabled = clipboardEnabled; settings.save(); refreshClipboard() } }
     @Published var clipboardPeerID: String { didSet { settings.clipboardPeerID = clipboardPeerID.isEmpty ? nil : clipboardPeerID; settings.save(); refreshClipboard() } }
     @Published private(set) var clipboardStatus = "Off"
     private var clipboard: MacClipboardSync!
     private func refreshClipboard() {
-        clipboard?.configure(enabled: enabled && clipboardEnabled && channelAllowsSharing,
+        clipboard?.configure(enabled: enabled && clipboardEnabled && channelAllowsSharing, images: clipboardImagesEnabled,
             selected: clipboardPeerID.isEmpty ? nil : clipboardPeerID, paired: settings.peers.map(\.id))
     }
 
@@ -159,6 +160,7 @@ import ServiceManagement
         }
         settings.save()
         self.settings = settings
+        clipboardImagesEnabled = settings.clipboardImagesEnabled
         clipboardEnabled = settings.clipboardEnabled
         clipboardPeerID = settings.clipboardPeerID ?? ""
         enabled = settings.enabled
@@ -932,7 +934,7 @@ import ServiceManagement
     private func handle(_ data: Data, from id: String) {
         var reader = MessageReader(data)
         switch reader.type {
-        case .clipboardCapabilities:
+        case .clipboardCapabilities, .clipboardImageCapabilities:
             clipboard.control(data, from: id)
         case .leave:
             guard let current = capture.published.remote, current.id == id else { break }

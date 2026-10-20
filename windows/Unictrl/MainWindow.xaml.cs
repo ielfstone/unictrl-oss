@@ -24,7 +24,9 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text));
+        ClipboardImagesSwitch.IsOn = settings.ClipboardImagesEnabled;
         ClipboardSwitch.IsOn = settings.ClipboardEnabled;
+        ClipboardImagesSwitch.IsEnabled = settings.ClipboardEnabled;
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "Unictrl.ico");
         AppWindow.SetIcon(icon);
         ExtendsContentIntoTitleBar = true;
@@ -213,10 +215,15 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private void OnClipboardImagesToggled(object sender, RoutedEventArgs e)
+    {
+        if (settings.ClipboardImagesEnabled == ClipboardImagesSwitch.IsOn) return;
+        settings.ClipboardImagesEnabled = ClipboardImagesSwitch.IsOn; settings.Save(); clipboard.Refresh();
+    }
     private void OnClipboardToggled(object sender, RoutedEventArgs e)
     {
         if (settings.ClipboardEnabled == ClipboardSwitch.IsOn) return;
-        settings.ClipboardEnabled = ClipboardSwitch.IsOn; settings.Save(); clipboard.Refresh();
+        settings.ClipboardEnabled = ClipboardSwitch.IsOn; ClipboardImagesSwitch.IsEnabled = settings.ClipboardEnabled; settings.Save(); clipboard.Refresh();
     }
 
     private void OnEnabledToggled(object sender, RoutedEventArgs e)

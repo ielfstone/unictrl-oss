@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'artifacts' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $stage = Join-Path $out ('windows-stage-' + [guid]::NewGuid().ToString('N'))
-$packageName = 'Unictrl-0.2.0-windows-x64-portable'
+$packageName = 'Unictrl-0.3.0-windows-x64-portable'
 $payload = Join-Path $stage $packageName
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 $project = Join-Path $repo 'windows/Unictrl/Unictrl.csproj'
@@ -83,9 +83,9 @@ foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
 }
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $payload 'Source.zip')
 $buildInfo = [ordered]@{
-    version = '0.2.0'; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.3.0'; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
-    layoutVersion = 2; feature = 'bidirectional plain-text clipboard v1'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
+    layoutVersion = 2; feature = 'bidirectional text and PNG clipboard v2'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $buildInfo | ConvertTo-Json | Set-Content (Join-Path $payload 'BUILD-INFO.json') -Encoding utf8
 $zip = Join-Path $out ($packageName + '.zip')

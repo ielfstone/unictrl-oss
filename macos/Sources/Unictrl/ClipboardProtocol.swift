@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Only clipboard text v1. All JSON records fit the existing 16 KiB encrypted frame.
+/// Text v1 plus negotiated PNG images. All JSON records fit the existing 16 KiB encrypted frame.
 struct ClipboardPacket: Codable {
     var kind: String
     var id: String? = nil
@@ -10,11 +10,15 @@ struct ClipboardPacket: Codable {
     var hash: String? = nil
     var offset: Int? = nil
     var data: String? = nil
+    var mime: String? = nil
+    var width: Int? = nil
+    var height: Int? = nil
 }
 
 struct ClipboardEffects {
     var packets: [ClipboardPacket] = []
     var text: String? = nil
+    var png: Data? = nil
     var id: String? = nil
 }
 
@@ -22,14 +26,17 @@ struct ClipboardEffects {
 /// become local copy events. A pending Windows copy takes precedence over earlier Mac offers.
 final class ClipboardReplica {
     static let maxBytes = 1_048_576
+    static let maxImageBytes = 10 * 1_048_576
+    static let maxPixels = 20_000_000
     static let chunkBytes = 8_192
     static let context = "unictrl clipboard v1"
     let authority: Bool
+    var imagesAllowed = false
     private(set) var revision: UInt64 = 0
     private(set) var latestID: String?
     private(set) var localID: String?
     private var pendingLocal: String?
-    private var incoming: (id: String, count: Int, hash: String, bytes: Data)?
+    private var incoming: (id: String, count: Int, hash: String, mime: String?, width: Int?, height: Int?, bytes: Data)?
     init(authority: Bool) { self.authority = authority }
     func cancelIncoming() { incoming = nil }
     func invalidateLocal() { incoming = nil; latestID = nil; localID = nil; pendingLocal = nil }
@@ -41,10 +48,17 @@ final class ClipboardReplica {
     func copy(_ text: String, id: String = UUID().uuidString) -> [ClipboardPacket] {
         let bytes = Data(text.utf8)
         guard !bytes.isEmpty, bytes.count <= Self.maxBytes, !text.contains("\0"), UUID(uuidString: id) != nil else { return [] }
+        return offer(bytes, id: id)
+    }
+    func copyImage(_ png: Data, id: String = UUID().uuidString) -> [ClipboardPacket] {
+        guard imagesAllowed, let size = Self.pngSize(png), UUID(uuidString: id) != nil else { return [] }
+        return offer(png, id: id, mime: "image/png", width: size.0, height: size.1)
+    }
+    private func offer(_ bytes: Data, id: String, mime: String? = nil, width: Int? = nil, height: Int? = nil) -> [ClipboardPacket] {
         incoming = nil; localID = id
         var result: [ClipboardPacket] = []
         if authority { result.append(order(id)) } else { pendingLocal = id }
-        result.append(ClipboardPacket(kind: "begin", id: id, count: bytes.count, hash: Self.digest(bytes)))
+        result.append(ClipboardPacket(kind: "begin", id: id, count: bytes.count, hash: Self.digest(bytes), mime: mime, width: width, height: height))
         for offset in stride(from: 0, to: bytes.count, by: Self.chunkBytes) {
             result.append(ClipboardPacket(kind: "chunk", id: id, offset: offset,
                 data: bytes.subdata(in: offset..<min(offset + Self.chunkBytes, bytes.count)).base64EncodedString()))
@@ -61,11 +75,14 @@ final class ClipboardReplica {
             revision = next; latestID = id; incoming = nil
             if pendingLocal == id { pendingLocal = nil }
         case "begin":
-            guard let count = packet.count, count > 0, count <= Self.maxBytes,
+            let image = packet.mime == "image/png"
+            guard packet.mime == nil || (image && imagesAllowed),
+                  let count = packet.count, count > 0, count <= (image ? Self.maxImageBytes : Self.maxBytes),
+                  !image || Self.validSize(packet.width ?? 0, packet.height ?? 0),
                   let hash = packet.hash, hash.count == 64, hash.allSatisfy({ $0.isHexDigit }) else { return result }
             if authority { result.packets.append(order(id)) }
             guard latestID == id, pendingLocal == nil else { return result }
-            incoming = (id, count, hash, Data())
+            incoming = (id, count, hash, packet.mime, packet.width, packet.height, Data())
         case "chunk":
             guard var transfer = incoming, transfer.id == id, packet.offset == transfer.bytes.count,
                   let data = packet.data, data.utf8.count <= 11_000,
@@ -77,12 +94,27 @@ final class ClipboardReplica {
         case "end":
             guard let transfer = incoming, transfer.id == id else { return result }
             incoming = nil
-            guard isCurrent(id), transfer.bytes.count == transfer.count, Self.digest(transfer.bytes) == transfer.hash,
-                  let text = String(data: transfer.bytes, encoding: .utf8), !text.contains("\0") else { return result }
-            result.text = text; result.id = id
+            guard isCurrent(id), transfer.bytes.count == transfer.count, Self.digest(transfer.bytes) == transfer.hash else { return result }
+            if transfer.mime == "image/png" {
+                guard imagesAllowed, let size = Self.pngSize(transfer.bytes), size.0 == transfer.width, size.1 == transfer.height else { return result }
+                result.png = transfer.bytes; result.id = id
+            } else if let text = String(data: transfer.bytes, encoding: .utf8), !text.contains("\0") {
+                result.text = text; result.id = id
+            }
         default: break
         }
         return result
+    }
+    static func validSize(_ width: Int, _ height: Int) -> Bool {
+        width > 0 && height > 0 && width <= 16_384 && height <= 16_384 && width <= maxPixels / height
+    }
+    static func pngSize(_ data: Data) -> (Int, Int)? {
+        let b = Array(data.prefix(24))
+        guard data.count >= 45, data.count <= maxImageBytes, b.count == 24,
+              Array(b[0..<8]) == [137,80,78,71,13,10,26,10], Array(b[8..<16]) == [0,0,0,13,73,72,68,82] else { return nil }
+        func u32(_ i: Int) -> Int { Int(b[i]) << 24 | Int(b[i+1]) << 16 | Int(b[i+2]) << 8 | Int(b[i+3]) }
+        let width = u32(16), height = u32(20)
+        return validSize(width, height) ? (width, height) : nil
     }
     static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     static func message(_ packet: ClipboardPacket) -> MessageWriter? {

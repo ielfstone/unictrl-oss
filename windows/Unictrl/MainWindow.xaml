@@ -147,12 +147,13 @@
                     </Border>
                 </StackPanel>
 
-                <TextBlock Text="Shared text clipboard" Style="{StaticResource SectionHeaderStyle}" />
+                <TextBlock Text="Shared clipboard" Style="{StaticResource SectionHeaderStyle}" />
                 <Border Style="{StaticResource CardStyle}" Padding="16,14">
                     <StackPanel Spacing="6">
                         <ToggleSwitch x:Name="ClipboardSwitch" Header="Share text clipboard" Toggled="OnClipboardToggled" />
+                        <ToggleSwitch x:Name="ClipboardImagesSwitch" Header="Share images too" Toggled="OnClipboardImagesToggled" />
                         <TextBlock x:Name="ClipboardStatus" Text="Off" TextWrapping="Wrap" />
-                        <TextBlock Text="Enable on both computers. New plain text only, up to 1 MiB. Images and files are planned for later versions." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock Text="Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Files are not included." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>
                 </Border>
 

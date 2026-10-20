@@ -22,6 +22,7 @@ public sealed class Settings
     public string KeyboardProfile { get; set; } = "mx-keys-legends";
     /// 0 = use the monitor's reported physical size.
     public double ScreenWidthMmOverride { get; set; }
+    public bool ClipboardImagesEnabled { get; set; }
     public bool ClipboardEnabled { get; set; }
     public bool Enabled { get; set; } = true;
     public bool StartAtLogin { get; set; } = !IsPortable;

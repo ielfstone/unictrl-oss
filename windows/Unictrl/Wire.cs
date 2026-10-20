@@ -8,6 +8,7 @@ namespace Unictrl;
 internal enum MessageType : byte
 {
     ClipboardCapabilities = 0x30,
+    ClipboardImageCapabilities = 0x32,
     ClipboardTicket = 0x31,
     ClipboardData = 0x33,
     Hello = 0x01,

@@ -81,14 +81,15 @@ struct SettingsView: View {
 
             QualitySection(quality: controller.quality, devices: controller.devices)
 
-            Section("Shared text clipboard") {
+            Section("Shared clipboard") {
                 Toggle("Share text clipboard", isOn: $controller.clipboardEnabled)
+                Toggle("Share images too", isOn: $controller.clipboardImagesEnabled).disabled(!controller.clipboardEnabled)
                 Picker("Windows PC", selection: $controller.clipboardPeerID) {
                     Text("Automatic (one paired PC)").tag("")
                     ForEach(controller.devices) { Text($0.name).tag($0.id) }
                 }
                 Text(controller.clipboardStatus).font(.caption).foregroundStyle(.secondary)
-                Text("Enable on both computers. New plain text only, up to 1 MiB. Images and files are planned for later versions.").font(.caption).foregroundStyle(.secondary)
+                Text("Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Files are not included.").font(.caption).foregroundStyle(.secondary)
             }
 
             Section("General") {

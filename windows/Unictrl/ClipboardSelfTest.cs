@@ -10,14 +10,21 @@ internal static class ClipboardSelfTest
 {
     public static void Run()
     {
+        RunCase(false); RunCase(true); CodecChecks();
+        Log.Write("clipboard_test", "passed bidirectional_native_text_and_images authenticated_transport no_echo alpha dib");
+    }
+    private static void RunCase(bool images)
+    {
         const string fromPc = "Windows → Mac：中文 🧩\nline 2\r\nTab\t";
         const string fromMac = "Mac → Windows：双向文本 ✓";
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        var settings = new Settings { Enabled = true, ClipboardEnabled = true, MacAddress = "127.0.0.1",
+        var settings = new Settings { Enabled = true, ClipboardEnabled = true, ClipboardImagesEnabled = images, MacAddress = "127.0.0.1",
             Port = ((IPEndPoint)listener.LocalEndpoint).Port, PairingKey = "ci-clipboard-only-not-a-real-key", DeviceId = Guid.NewGuid().ToString("D") };
         var ticket = Enumerable.Repeat((byte)4, 16).ToArray();
         using var ready = new ManualResetEventSlim();
+        var png = ImageFixture();
+        using var imageSentBack = new ManualResetEventSlim();
         using var sentBack = new ManualResetEventSlim();
         var mockMac = Task.Run(() =>
         {
@@ -32,7 +39,7 @@ internal static class ClipboardSelfTest
             using var secure = new SecureChannel(settings.PairingKey, hello[8..40], salt, true, ClipboardReplica.Context);
             stream.Write(secure.Seal(ClipboardReplica.Encode(new("ready"))));
             Check(ClipboardReplica.Parse(Read(stream, secure))?.Kind == "ready", "encrypted client proof");
-            var mac = new ClipboardReplica(true);
+            var mac = new ClipboardReplica(true) { ImagesAllowed = images };
             string? received = null;
             while (received is null)
             {
@@ -46,6 +53,21 @@ internal static class ClipboardSelfTest
             sentBack.Set();
             var ack = ClipboardReplica.Parse(Read(stream, secure));
             Check(ack?.Kind == "ack", "native clipboard write confirmed");
+            if (images)
+            {
+                byte[]? receivedPng = null;
+                while (receivedPng is null)
+                {
+                    var packet = ClipboardReplica.Parse(Read(stream, secure)) ?? throw new InvalidDataException("image test packet");
+                    var effect = mac.Receive(packet);
+                    foreach (var replyPacket in effect.Packets) stream.Write(secure.Seal(ClipboardReplica.Encode(replyPacket)));
+                    receivedPng = effect.Png;
+                }
+                CheckPixels(receivedPng);
+                foreach (var packet in mac.CopyImage(png)) stream.Write(secure.Seal(ClipboardReplica.Encode(packet)));
+                imageSentBack.Set();
+                Check(ClipboardReplica.Parse(Read(stream, secure))?.Kind == "ack", "native image write confirmed");
+            }
             stream.ReadTimeout = 1500;
             try { var extra = ClipboardReplica.Parse(Read(stream, secure)); throw new InvalidDataException("remote write echoed: " + extra?.Kind); }
             catch (IOException error) when (error.InnerException is SocketException socket && socket.SocketErrorCode == SocketError.TimedOut) { }
@@ -57,12 +79,14 @@ internal static class ClipboardSelfTest
             if (packet.Length == 3 && packet[0] == (byte)MessageType.ClipboardCapabilities && packet[2] == 1)
             {
                 clipboard.Control(owner, MessageType.ClipboardCapabilities, [1, 1]);
+                clipboard.Control(owner, MessageType.ClipboardImageCapabilities, [1, images ? (byte)1 : (byte)0]);
                 clipboard.Control(owner, MessageType.ClipboardTicket, ticket);
             }
         });
         Check(ready.Wait(8000), "native listener ready");
         using var editorReady = new ManualResetEventSlim();
         using var editor = new DesktopClipboard(_ => { }, _ => { });
+        editor.SetImagesAllowed(images);
         editor.SetActive(true, editorReady.Set);
         Check(editorReady.Wait(3000), "test clipboard writer ready");
         editor.Write(fromPc, () => true);
@@ -70,10 +94,62 @@ internal static class ClipboardSelfTest
         var applied = false;
         for (var i = 0; i < 120; i++) { if (GetText() == fromMac) { applied = true; break; } Thread.Sleep(25); }
         Check(applied, "Mac peer to Windows native pasteboard");
+        if (images)
+        {
+            editor.Write(new ClipboardContent(Png: png), () => true);
+            Check(imageSentBack.Wait(8000), "bidirectional image transport");
+            var nativeImage = false;
+            for (var i = 0; i < 120; i++)
+            {
+                var bytes = GetPng();
+                if (bytes is not null) { CheckPixels(bytes); nativeImage = true; break; }
+                Thread.Sleep(25);
+            }
+            Check(nativeImage, "Mac peer to Windows native PNG clipboard");
+            Check(IsClipboardFormatAvailable(8) && IsClipboardFormatAvailable(17), "native DIB and DIBV5 fallback");
+        }
         Check(mockMac.Wait(8000), "no echo and bounded shutdown"); mockMac.GetAwaiter().GetResult();
         clipboard.Detach(owner);
         listener.Stop();
-        Log.Write("clipboard_test", "passed bidirectional_native_text authenticated_transport no_echo");
+
+    }
+    private static byte[] ImageFixture()
+    {
+        using var bitmap = new System.Drawing.Bitmap(2, 2, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        bitmap.SetPixel(0, 0, System.Drawing.Color.Red);
+        bitmap.SetPixel(1, 0, System.Drawing.Color.FromArgb(128, 0, 255, 0));
+        bitmap.SetPixel(0, 1, System.Drawing.Color.Transparent);
+        bitmap.SetPixel(1, 1, System.Drawing.Color.Yellow);
+        return ClipboardImage.Encode(bitmap);
+    }
+    private static void CheckPixels(byte[] png)
+    {
+        using var bitmap = ClipboardImage.Decode(png);
+        Check(bitmap.Width == 2 && bitmap.Height == 2, "image dimensions");
+        Check(bitmap.GetPixel(0, 0).R == 255 && bitmap.GetPixel(0, 0).A == 255, "red pixel");
+        Check(Math.Abs(bitmap.GetPixel(1, 0).A - 128) <= 1 && bitmap.GetPixel(0, 1).A == 0, "alpha retained");
+    }
+    private static void CodecChecks()
+    {
+        using var image = ClipboardImage.Decode(ImageFixture());
+        CheckPixels(ClipboardImage.FromDib(ClipboardImage.ToDib(image, true)));
+        using var legacy = ClipboardImage.Decode(ClipboardImage.FromDib(ClipboardImage.ToDib(image, false)));
+        Check(legacy.GetPixel(0, 1).A == 255 && legacy.GetPixel(0, 1).R == 255, "legacy DIB white background");
+        try { ClipboardImage.FromDib(new byte[40]); throw new Exception("bad DIB accepted"); }
+        catch (InvalidDataException) { }
+    }
+    private static byte[]? GetPng()
+    {
+        Open();
+        try
+        {
+            var handle = GetClipboardData(RegisterClipboardFormatW("PNG")); var size = (ulong)GlobalSize(handle);
+            if (handle == 0 || size == 0 || size > ClipboardReplica.MaxImageBytes) return null;
+            var pointer = GlobalLock(handle); if (pointer == 0) return null;
+            try { var bytes = new byte[(int)size]; Marshal.Copy(pointer, bytes, 0, bytes.Length); return bytes; }
+            finally { GlobalUnlock(handle); }
+        }
+        finally { CloseClipboard(); }
     }
     private static void Check(bool value, string what) { if (!value) throw new InvalidDataException("Clipboard diagnostic failed: " + what); }
     private static byte[] Read(NetworkStream stream, SecureChannel secure)
@@ -99,6 +175,8 @@ internal static class ClipboardSelfTest
         }
         finally { CloseClipboard(); }
     }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string format);
+    [DllImport("user32.dll")] private static extern bool IsClipboardFormatAvailable(uint format);
     [DllImport("user32.dll")] private static extern bool OpenClipboard(nint hwnd);
     [DllImport("user32.dll")] private static extern bool CloseClipboard();
     [DllImport("user32.dll")] private static extern bool EmptyClipboard();

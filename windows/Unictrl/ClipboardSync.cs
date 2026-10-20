@@ -15,7 +15,9 @@ internal sealed class ClipboardSync : IDisposable
     private ClipboardReplica replica = new(false);
     private object? owner;
     private Action<byte[]>? sendControl;
-    private bool remoteEnabled, ready, disposed;
+    private bool remoteEnabled, remoteImages, ready, disposed;
+    private int receiveCount, receivePercent = -1;
+    private bool receivingImage;
     private int generation;
     private TcpClient? client;
     private CancellationTokenSource? transfer;
@@ -28,7 +30,7 @@ internal sealed class ClipboardSync : IDisposable
     private bool Enabled => settings.ClipboardEnabled && settings.Enabled && !disposed;
     public void Attach(object sessionOwner, Action<byte[]> send)
     {
-        lock (gate) { Stop(); owner = sessionOwner; sendControl = send; remoteEnabled = false; }
+        lock (gate) { Stop(); owner = sessionOwner; sendControl = send; remoteEnabled = remoteImages = false; }
         Announce();
     }
     public void Detach(object sessionOwner)
@@ -36,7 +38,7 @@ internal sealed class ClipboardSync : IDisposable
         lock (gate)
         {
             if (!ReferenceEquals(owner, sessionOwner)) return;
-            Stop(); owner = null; sendControl = null; remoteEnabled = false;
+            Stop(); owner = null; sendControl = null; remoteEnabled = remoteImages = false;
         }
         status(Enabled ? "Waiting for Mac" : "Off");
     }
@@ -49,7 +51,15 @@ internal sealed class ClipboardSync : IDisposable
     {
         Action<byte[]>? send;
         lock (gate) send = sendControl;
-        if (send is not null) _ = Task.Run(() => { try { send([(byte)MessageType.ClipboardCapabilities, 1, Enabled ? (byte)1 : (byte)0]); } catch { } });
+        if (send is not null) _ = Task.Run(() =>
+        {
+            try
+            {
+                send([(byte)MessageType.ClipboardCapabilities, 1, Enabled ? (byte)1 : (byte)0]);
+                send([(byte)MessageType.ClipboardImageCapabilities, 1, Enabled && settings.ClipboardImagesEnabled ? (byte)1 : (byte)0]);
+            }
+            catch { }
+        });
         status(Enabled ? "Waiting for Mac to enable text clipboard" : "Off");
     }
     public void Control(object sessionOwner, MessageType type, byte[] data)
@@ -62,6 +72,11 @@ internal sealed class ClipboardSync : IDisposable
                 remoteEnabled = data[1] == 1;
                 if (!remoteEnabled) { Stop(); status(Enabled ? "Enable text clipboard on Mac" : "Off"); }
             }
+            else if (type == MessageType.ClipboardImageCapabilities && data.Length == 2 && data[0] == 1 && data[1] <= 1)
+            {
+                remoteImages = data[1] == 1; UpdateImageSupport();
+                if (ready) status(ReadyStatus);
+            }
             else if (type == MessageType.ClipboardTicket && data.Length == 16 && Enabled && remoteEnabled)
             {
                 Stop(); var current = generation; var token = transfer = new CancellationTokenSource();
@@ -71,11 +86,14 @@ internal sealed class ClipboardSync : IDisposable
             }
         }
     }
+    private bool ImagesAllowed => Enabled && settings.ClipboardImagesEnabled && remoteImages;
+    private string ReadyStatus => ImagesAllowed ? "Ready · text and images" : "Ready · text only";
+    private void UpdateImageSupport() { replica.ImagesAllowed = ImagesAllowed; desktop.SetImagesAllowed(ImagesAllowed); }
     private void Stop()
     {
         generation++; ready = false; transfer?.Cancel(); transfer?.Dispose(); transfer = null;
         client?.Dispose(); client = null; desktop.SetActive(false);
-        output.Clear(); replica = new(false);
+        output.Clear(); replica = new(false); UpdateImageSupport();
     }
     private void Run(byte[] ticket, string key, string address, int port, byte[] id, int current, CancellationToken cancel)
     {
@@ -97,7 +115,8 @@ internal sealed class ClipboardSync : IDisposable
             lock (gate)
             {
                 if (current != generation || !Enabled) return;
-                ready = true; desktop.SetActive(true, () => { lock (gate) { if (current == generation && ready) status("Ready · text only"); } });
+                UpdateImageSupport();
+                ready = true; desktop.SetActive(true, () => { lock (gate) { if (current == generation && ready) status(ReadyStatus); } });
             }
             var writer = Task.Run(() => WriteLoop(stream, channel, current, cancel), cancel);
             while (!cancel.IsCancellationRequested)
@@ -108,13 +127,19 @@ internal sealed class ClipboardSync : IDisposable
                 {
                     if (current != generation || !ready) break;
                     if (DateTime.UtcNow - incomingAt > TimeSpan.FromSeconds(10)) replica.CancelIncoming();
-                    if (packet.Kind == "begin") incomingAt = DateTime.UtcNow;
-                    if (packet.Kind == "ack" && packet.Id == replica.LocalId) { status("Ready · text only"); continue; }
+                    if (packet.Kind is "begin" or "chunk") incomingAt = DateTime.UtcNow;
+                    if (packet.Kind == "begin") { receivingImage = packet.Mime == "image/png" && ImagesAllowed; receiveCount = packet.Count ?? 0; receivePercent = -1; }
+                    if (receivingImage && packet.Kind == "chunk" && receiveCount > 0)
+                    {
+                        var percent = Math.Min(99, (packet.Offset ?? 0) * 100 / receiveCount);
+                        if (percent != receivePercent) { receivePercent = percent; status($"Receiving image {percent}%"); }
+                    }
+                    if (packet.Kind == "ack" && packet.Id == replica.LocalId) { status(ReadyStatus); continue; }
                     var effects = replica.Receive(packet);
                     Enqueue(effects.Packets);
-                    if (effects.Text is { } text && effects.Id is { } copyId)
-                        desktop.Write(text, () => { lock (gate) return current == generation && ready && replica.IsCurrent(copyId); },
-                            () => { lock (gate) { if (current == generation && ready) { Enqueue([new("ack", copyId)]); status("Ready · text only"); } } });
+                    if ((effects.Text is not null || effects.Png is not null) && effects.Id is { } copyId)
+                        desktop.Write(new ClipboardContent(effects.Text, effects.Png), () => { lock (gate) return current == generation && ready && replica.IsCurrent(copyId); },
+                            () => { lock (gate) { if (current == generation && ready) { Enqueue([new("ack", copyId)]); status(ReadyStatus); } } });
                 }
             }
         }
@@ -142,6 +167,7 @@ internal sealed class ClipboardSync : IDisposable
     {
         try
         {
+            var imageTotal = 0; var percent = -1;
             while (!cancel.IsCancellationRequested)
             {
                 signal.Wait(cancel);
@@ -154,28 +180,35 @@ internal sealed class ClipboardSync : IDisposable
                         if (!output.TryDequeue(out packet!)) break;
                     }
                     stream.Write(channel.Seal(ClipboardReplica.Encode(packet)));
+                    if (packet.Kind == "begin") { imageTotal = packet.Mime == "image/png" ? packet.Count ?? 0 : 0; percent = -1; }
+                    if (imageTotal > 0 && packet.Kind == "chunk")
+                    {
+                        var next = Math.Min(99, (packet.Offset ?? 0) * 100 / imageTotal);
+                        if (next != percent) { percent = next; status($"Sending image {next}%"); }
+                        if (cancel.WaitHandle.WaitOne(8)) return; // about 1 MiB/s; input uses a separate socket.
+                    }
                 }
             }
         }
         catch { lock (gate) { if (current == generation) client?.Dispose(); } }
     }
-    private void LocalCopy(string? text)
+    private void LocalCopy(ClipboardContent? content)
     {
         lock (gate)
         {
             if (!ready || !Enabled) return;
             replica.CancelIncoming();
-            if (string.IsNullOrEmpty(text)) { replica.InvalidateLocal(); output = new Queue<ClipboardPacket>(output.Where(p => p.Kind == "order")); return; }
-            var packets = replica.Copy(text);
-            if (packets.Count == 0) { replica.InvalidateLocal(); status("Text exceeds 1 MiB or is unsupported"); return; }
+            if (content is null || (content.Png is null && string.IsNullOrEmpty(content.Text))) { replica.InvalidateLocal(); output = new Queue<ClipboardPacket>(output.Where(p => p.Kind == "order")); return; }
+            var packets = content.Png is { } png ? replica.CopyImage(png) : replica.Copy(content.Text!);
+            if (packets.Count == 0) { replica.InvalidateLocal(); status("Content exceeds limits or is unsupported"); return; }
             output = new Queue<ClipboardPacket>(output.Where(p => p.Kind == "order"));
-            status("Syncing text…");
+            status(content.Png is null ? "Syncing text…" : "Preparing image…");
             Enqueue(packets);
         }
     }
     private void Enqueue(List<ClipboardPacket> packets)
     {
-        if (output.Count + packets.Count > 512) { client?.Dispose(); return; }
+        if (output.Count + packets.Count > 2048) { client?.Dispose(); return; }
         foreach (var packet in packets) output.Enqueue(packet);
         if (packets.Count != 0) signal.Release();
     }

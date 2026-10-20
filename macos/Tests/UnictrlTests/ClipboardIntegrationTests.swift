@@ -8,6 +8,7 @@ private final class ClipboardTestClient {
     let connection: NWConnection
     init(port: UInt16) { connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp) }
     func open() async throws {
+        FileHandle.standardError.write(Data("clipboard test: opening \(connection.endpoint)\n".utf8))
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             connection.stateUpdateHandler = { [weak self] state in
                 switch state {
@@ -27,6 +28,7 @@ private final class ClipboardTestClient {
         }
     }
     func read(_ count: Int) async throws -> Data {
+        FileHandle.standardError.write(Data("clipboard test: read \(count)\n".utf8))
         let timeout = DispatchWorkItem { [connection] in connection.cancel() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: timeout)
         return try await withCheckedThrowingContinuation { done in
@@ -48,7 +50,9 @@ private final class ClipboardTestClient {
 }
 
 @Suite(.serialized) struct ClipboardIntegrationTests {
-    @MainActor @Test func nativeMacClipboardAndAuthenticatedAuxiliarySocket() async throws {
+    @MainActor @Test func nativeMacTextAndAuthenticatedAuxiliarySocket() async throws { try await exercise(images: false) }
+    @MainActor @Test func nativeMacImagesAndAuthenticatedAuxiliarySocket() async throws { try await exercise(images: true) }
+    @MainActor private func exercise(images: Bool) async throws {
         let peer = UUID().uuidString
         let uuid = UUID(uuidString: peer)!
         let peerBytes = withUnsafeBytes(of: uuid.uuid) { Data($0) }
@@ -61,9 +65,9 @@ private final class ClipboardTestClient {
         let service = MacClipboardSync(server: server, keyFor: server.keyFor, pasteboard: board)
         server.onConnected = { id, _ in service.connected(id) }
         server.onDisconnected = { id, _ in service.disconnected(id) }
-        server.onMessage = { id, data in if data.first == MessageType.clipboardCapabilities.rawValue { service.control(data, from: id) } }
+        server.onMessage = { id, data in if data.first == MessageType.clipboardCapabilities.rawValue || data.first == MessageType.clipboardImageCapabilities.rawValue { service.control(data, from: id) } }
         server.onClipboardConnection = { service.accept($0) }
-        service.configure(enabled: true, selected: peer, paired: [peer])
+        service.configure(enabled: true, images: images, selected: peer, paired: [peer])
         try server.start()
         defer { service.stop(); server.stop(); board.releaseGlobally() }
         let port = try #require(server.boundPort)
@@ -78,8 +82,11 @@ private final class ClipboardTestClient {
         try await control.send(controlCipher.seal(name.data)!)
         let caps = try await control.readMessage(controlCipher)
         #expect(caps == Data([MessageType.clipboardCapabilities.rawValue, 1, 1]))
+        #expect(try await control.readMessage(controlCipher) == Data([MessageType.clipboardImageCapabilities.rawValue, 1, images ? 1 : 0]))
         var response = MessageWriter(.clipboardCapabilities); response.u8(1); response.u8(1)
         try await control.send(controlCipher.seal(response.data)!)
+        var imageCaps = MessageWriter(.clipboardImageCapabilities); imageCaps.u8(1); imageCaps.u8(images ? 1 : 0)
+        try await control.send(controlCipher.seal(imageCaps.data)!)
         let ticket = try await control.readMessage(controlCipher)
         #expect(ticket.count == 17)
         let data = ClipboardTestClient(port: port)
@@ -91,7 +98,7 @@ private final class ClipboardTestClient {
         let cipher = SecureChannel(pairingKey: key, clientSalt: dataSalt, serverSalt: reply.suffix(32), isServer: false, context: ClipboardReplica.context)
         #expect(ClipboardReplica.parse(try await data.readMessage(cipher))?.kind == "ready")
         try await data.send(cipher.seal(ClipboardReplica.message(ClipboardPacket(kind: "ready"))!.data)!)
-        let pc = ClipboardReplica(authority: false)
+        let pc = ClipboardReplica(authority: false); pc.imagesAllowed = images
         let text = "Windows → Mac：中文 🧩\nline 2"
         for packet in pc.copy(text) { try await data.send(cipher.seal(ClipboardReplica.message(packet)!.data)!) }
         let order = try #require(ClipboardReplica.parse(try await data.readMessage(cipher)))
@@ -109,9 +116,31 @@ private final class ClipboardTestClient {
             if let text = pc.receive(packet).text { received = text; break }
         }
         #expect(received == macText)
+        if images {
+            let png = Data(base64Encoded: try ClipboardImageTests.fixture().png)!
+            let offered = pc.copyImage(png)
+            for packet in offered { try await data.send(cipher.seal(ClipboardReplica.message(packet)!.data)!) }
+            for _ in 0..<8 {
+                let packet = try #require(ClipboardReplica.parse(try await data.readMessage(cipher)))
+                _ = pc.receive(packet)
+                if packet.kind == "ack" && packet.id == offered.last?.id { break }
+            }
+            #expect(board.types?.contains(.png) == true)
+            #expect(NSBitmapImageRep(data: board.data(forType: .png)!)?.pixelsWide == 2)
+            let item = NSPasteboardItem(); item.setData(png, forType: .png)
+            board.clearContents(); board.writeObjects([item])
+            var receivedImage: Data?
+            for _ in 0..<8 {
+                let packet = try #require(ClipboardReplica.parse(try await data.readMessage(cipher)))
+                if let image = pc.receive(packet).png { receivedImage = image; break }
+            }
+            #expect(receivedImage != nil)
+            #expect(NSBitmapImageRep(data: receivedImage!)?.pixelsHigh == 2)
+        }
         service.configure(enabled: false, selected: peer, paired: [peer])
         let disabled = try await control.readMessage(controlCipher)
         #expect(disabled == Data([MessageType.clipboardCapabilities.rawValue, 1, 0]))
+        _ = try await control.readMessage(controlCipher) // images disabled capability
         var ping = MessageWriter(.ping); ping.u64(77)
         server.send(ping, to: peer)
         #expect(try await control.readMessage(controlCipher) == ping.data) // disabling clipboard keeps input connection alive
