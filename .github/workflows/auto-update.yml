@@ -1,7 +1,7 @@
 name: Signed auto-update Windows build
 on:
   push:
-    branches: [feature/auto-update]
+    branches: [feature/auto-update, fix/mac-image-clipboard]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,10 +21,10 @@ jobs:
         run: ./tools/windows/build-portable.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: Unictrl-0.4.0-windows-x64-portable
+          name: Unictrl-0.4.1-windows-x64-portable
           path: |
-            artifacts/Unictrl-0.4.0-windows-x64-portable.zip
-            artifacts/Unictrl-0.4.0-windows-x64-portable.zip.sha256
+            artifacts/Unictrl-0.4.1-windows-x64-portable.zip
+            artifacts/Unictrl-0.4.1-windows-x64-portable.zip.sha256
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4

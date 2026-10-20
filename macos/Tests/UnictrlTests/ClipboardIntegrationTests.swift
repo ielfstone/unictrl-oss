@@ -127,7 +127,10 @@ private final class ClipboardTestClient {
             }
             #expect(board.types?.contains(.png) == true)
             #expect(NSBitmapImageRep(data: board.data(forType: .png)!)?.pixelsWide == 2)
+            // Real Mac copy operations can advertise both a file URL and actual raster bytes.
+            // The URL must not hide the image or be opened by the sync service.
             let item = NSPasteboardItem(); item.setData(png, forType: .png)
+            item.setString("file:///nonexistent/unictrl-image-regression.png", forType: .fileURL)
             board.clearContents(); board.writeObjects([item])
             var receivedImage: Data?
             for _ in 0..<8 {
@@ -136,6 +139,44 @@ private final class ClipboardTestClient {
             }
             #expect(receivedImage != nil)
             #expect(NSBitmapImageRep(data: receivedImage!)?.pixelsHigh == 2)
+
+            // Screenshot-sized, incompressible pixels exercise many encrypted chunks and TIFF-only sources.
+            let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 257, pixelsHigh: 129,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 257 * 4, bitsPerPixel: 32))
+            let pixels = try #require(bitmap.bitmapData)
+            var random: UInt32 = 0x12345678
+            for index in 0..<(257 * 129 * 4) {
+                random ^= random << 13; random ^= random >> 17; random ^= random << 5
+                pixels[index] = index % 4 == 3 ? 255 : UInt8(truncatingIfNeeded: random)
+            }
+            for type: NSPasteboard.PasteboardType in [.png, .tiff] {
+                let previousText = "text before \(type.rawValue)"
+                board.clearContents(); board.setString(previousText, forType: .string)
+                var gotText = false
+                for _ in 0..<8 {
+                    let packet = try #require(ClipboardReplica.parse(try await data.readMessage(cipher)))
+                    if pc.receive(packet).text == previousText { gotText = true; break }
+                }
+                #expect(gotText)
+                let raster = try #require(bitmap.representation(using: type == .png ? .png : .tiff, properties: [:]))
+                #expect(raster.count > 8_192)
+                let screenshot = NSPasteboardItem(); screenshot.setData(raster, forType: type)
+                screenshot.setString("file:///nonexistent/screenshot.png", forType: .fileURL)
+                board.clearContents(); board.writeObjects([screenshot])
+                var imageEffect: ClipboardEffects?
+                for _ in 0..<2048 {
+                    let packet = try #require(ClipboardReplica.parse(try await data.readMessage(cipher)))
+                    let effect = pc.receive(packet)
+                    if effect.png != nil { imageEffect = effect; break }
+                }
+                let receivedRaster = try #require(imageEffect?.png)
+                let decoded = try #require(NSBitmapImageRep(data: receivedRaster))
+                #expect(decoded.pixelsWide == 257 && decoded.pixelsHigh == 129)
+                #expect(decoded.bitmapData?[0] == pixels[0])
+                let ack = ClipboardPacket(kind: "ack", id: imageEffect?.id)
+                try await data.send(cipher.seal(ClipboardReplica.message(ack)!.data)!)
+            }
         }
         service.configure(enabled: false, selected: peer, paired: [peer])
         let disabled = try await control.readMessage(controlCipher)

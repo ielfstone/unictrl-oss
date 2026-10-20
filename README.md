@@ -15,7 +15,7 @@ The keyboard and mouse stay connected to the Mac; Unictrl forwards their input t
 network, encrypted. It feels like Apple's Universal Control, for a Mac and a Windows PC. Both sides are
 native apps: a SwiftUI menu bar app on macOS and a WinUI 3 app on Windows.
 
-This fork adds four-direction screen layouts and opt-in bidirectional **text and image clipboard sync** in version 0.4.0. Enable **Share text clipboard** on both computers, wait for **Ready**, then copy new text. For single images and screenshots, also enable **Share images too** on both ends (10 MiB PNG / 20 MP). File transfer is a later stage. See the [clipboard roadmap](docs/CLIPBOARD-ROADMAP.zh-Hans.md).
+This fork adds four-direction screen layouts and opt-in bidirectional **text and image clipboard sync** in version 0.4.1. Enable **Share text clipboard** on both computers, wait for **Ready**, then copy new text. For single images and screenshots, also enable **Share images too** on both ends (10 MiB PNG / 20 MP). File transfer is a later stage. See the [clipboard roadmap](docs/CLIPBOARD-ROADMAP.zh-Hans.md).
 
 The upstream project focuses on keyboard and pointer sharing. Clipboard sync and signed automatic updates in this branch are fork features. Updates check this fork’s stable GitHub Releases at launch and every six hours, download after signature verification, then install when you quit or choose Restart and update. Pairing and settings are preserved.
 
