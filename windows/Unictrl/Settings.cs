@@ -53,7 +53,6 @@ public sealed class Settings
         Settings settings;
         try { settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FileName)) ?? new(); }
         catch { settings = new(); }
-        if (IsPortable) settings.StartAtLogin = false;
         if (!Guid.TryParse(settings.DeviceId, out _))
         {
             settings.DeviceId = Guid.NewGuid().ToString("D").ToUpperInvariant();

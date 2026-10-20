@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 namespace Unictrl;
 internal sealed record UpdateAsset(string Url, string Sha256, long Size);
-internal sealed record UpdateRelease(string Version, UpdateAsset Macos, UpdateAsset Windows);
+internal sealed record UpdateRelease(string Version, UpdateAsset Macos, UpdateAsset Windows, UpdateAsset? WindowsInstaller = null);
 internal static class UpdateProtocol
 {
     public const string Feed = "https://github.com/ielfstone/unictrl-oss/releases/latest/download/update-v1.json";
@@ -24,7 +24,7 @@ internal static class UpdateProtocol
         if (!rsa.VerifyData(payload, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) throw new InvalidDataException("Update signature invalid");
         var release = JsonSerializer.Deserialize<UpdateRelease>(payload, Json) ?? throw new InvalidDataException("Update release");
         if (VersionOf(release.Version) is null) throw new InvalidDataException("Update version invalid");
-        foreach (var asset in new[] {release.Macos, release.Windows})
+        foreach (var asset in new[] {release.Macos, release.Windows, release.WindowsInstaller}.OfType<UpdateAsset>())
         {
             if (!Uri.TryCreate(asset.Url, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.Host != "github.com" || uri.UserInfo != "" ||
                 !uri.AbsolutePath.StartsWith($"/ielfstone/unictrl-oss/releases/download/v{release.Version}/", StringComparison.Ordinal) || uri.Query != "" || uri.Fragment != "" ||

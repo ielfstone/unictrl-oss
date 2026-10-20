@@ -24,7 +24,12 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        updater = new AppUpdater(settings, (text, ready) => DispatcherQueue.TryEnqueue(() => { UpdateStatus.Text = text; InstallUpdateButton.IsEnabled = ready; }));
+        updater = new AppUpdater(settings, state => DispatcherQueue.TryEnqueue(() => {
+            UpdateStatus.Text = state.Text; InstallUpdateButton.IsEnabled = state.Ready;
+            CancelUpdateButton.IsEnabled = state.CanCancel; CheckUpdateButton.IsEnabled = !state.CanCancel && !state.Ready;
+            UpdateProgress.Visibility = state.Progress is null ? Visibility.Collapsed : Visibility.Visible;
+            UpdateProgress.Value = (state.Progress ?? 0) * 100;
+        }));
         AutomaticUpdatesSwitch.IsOn = settings.AutomaticUpdates;
         clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text));
         ClipboardImagesSwitch.IsOn = settings.ClipboardImagesEnabled;
@@ -53,7 +58,7 @@ public sealed partial class MainWindow : Window
         ShowKeyboardDetail();
         RestoreDetails();
         StartAtLoginSwitch.IsOn = settings.StartAtLogin;
-        StartAtLoginSwitch.IsEnabled = !Settings.IsPortable;
+        StartAtLoginSwitch.IsEnabled = true;
         AboutText.Text = $"Unictrl {typeof(App).Assembly.GetName().Version?.ToString(3)} · This PC: {Environment.MachineName}";
         ShowPairing(string.IsNullOrEmpty(settings.PairingKey));
         UpdateDetail();
@@ -226,6 +231,7 @@ public sealed partial class MainWindow : Window
         settings.AutomaticUpdates = AutomaticUpdatesSwitch.IsOn; settings.Save();
         if (settings.AutomaticUpdates) _ = updater.Check();
     }
+    private void OnCancelUpdate(object sender, RoutedEventArgs e) => updater.CancelDownload();
     private void OnCheckUpdate(object sender, RoutedEventArgs e) => _ = updater.Check();
     private void OnInstallUpdate(object sender, RoutedEventArgs e) => updater.Install(Quit);
     private void OnClipboardImagesToggled(object sender, RoutedEventArgs e)

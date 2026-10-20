@@ -42,6 +42,20 @@ public partial class App : Application
     /// Command-line checks used during development: --discover-test, --pair-test host port code.
     private static bool RunDiagnostic(string[] args)
     {
+        if (args.Contains("--installation-test"))
+        {
+            try
+            {
+                var saved = Settings.Load();
+                if (Settings.IsPortable || saved.PairingKey != "ci-install-migration-only" || saved.DeviceId != "C3FB4A03-2578-454D-8132-3C74835A27C0") throw new Exception("Installed settings not preserved");
+                var original = AutoStart.IsEnabled();
+                try { if (!AutoStart.Enable() || !AutoStart.IsEnabled() || !AutoStart.Disable() || AutoStart.IsEnabled()) throw new Exception("User startup registration failed"); }
+                finally { if (original) AutoStart.Enable(); else AutoStart.Disable(); }
+                Log.Write("installation_test", "passed migration stable_path settings_preserved startup_toggle");
+            }
+            catch (Exception error) { Environment.ExitCode = 1; Log.Write("installation_test_failed", error.GetType().Name + ": " + error.Message); }
+            return true;
+        }
         if (args.Contains("--update-test"))
         {
             try { UpdateSelfTest.Run(); }

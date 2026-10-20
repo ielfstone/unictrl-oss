@@ -10,6 +10,8 @@ import Security
     @Published private(set) var status = "Updates come from your personal fork"
     @Published private(set) var busy = false
     @Published private(set) var preparedVersion: String?
+    @Published private(set) var downloadProgress: Double?
+    private var operation: Task<Void, Never>?
     private var candidate: URL?
     private var work: URL?
     private var timer: Timer?
@@ -24,8 +26,8 @@ import Security
     func check() {
         guard !busy, candidate == nil else { return }
         busy = true; status = "Checking for updates…"
-        Task {
-            defer { busy = false }
+        operation = Task {
+            defer { busy = false; downloadProgress = nil; operation = nil }
             do {
                 var request = URLRequest(url: UpdateProtocol.feed); request.timeoutInterval = 30; request.cachePolicy = .reloadIgnoringLocalCacheData
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -36,8 +38,17 @@ import Security
                 guard UpdateProtocol.newer(release.version, than: current) else { status = "Up to date · \(current)"; return }
                 status = "Downloading \(release.version)…"
                 var download = URLRequest(url: URL(string: release.macos.url)!); download.timeoutInterval = 300
-                let (temporary, reply) = try await URLSession.shared.download(for: download)
-                guard (reply as? HTTPURLResponse)?.statusCode == 200 else { throw UpdateProtocol.failure("Update download failed") }
+                downloadProgress = 0
+                let downloader = UpdateDownload(expected: release.macos.size) { [weak self] fraction in
+                    Task { @MainActor in
+                        guard let self, self.busy, self.downloadProgress != nil, self.operation?.isCancelled == false else { return }
+                        self.downloadProgress = fraction; self.status = "Downloading \(release.version) · \(Int(fraction * 100))%"
+                    }
+                }
+                let temporary = try await downloader.download(download)
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                try Task.checkCancellation()
+                status = "Verifying update…"; downloadProgress = nil
                 try UpdateProtocol.verify(temporary, asset: release.macos)
                 let installed = Bundle.main.bundleURL.standardizedFileURL
                 guard installed.pathExtension == "app", FileManager.default.isWritableFile(atPath: installed.deletingLastPathComponent().path) else {
@@ -49,13 +60,15 @@ import Security
                 let archive = root.appendingPathComponent("update.zip")
                 try FileManager.default.moveItem(at: temporary, to: archive)
                 let app = try await Task.detached(priority: .utility) { try Self.prepare(archive: archive, root: root, installed: installed, expected: release.version) }.value
+                try Task.checkCancellation()
                 candidate = app; preparedVersion = release.version; status = "\(release.version) ready · restart to install"
             } catch {
                 if let work { try? FileManager.default.removeItem(at: work) }; work = nil
-                status = "Update failed: \(error.localizedDescription)"
+                status = Task.isCancelled ? "Download cancelled" : "Update failed: \(error.localizedDescription)"
             }
         }
     }
+    func cancelDownload() { operation?.cancel() }
     nonisolated static func run(_ command: String, _ args: [String]) throws -> String {
         let task = Process(); task.executableURL = URL(fileURLWithPath: command); task.arguments = args
         let output = Pipe(); task.standardOutput = output; task.standardError = FileHandle.nullDevice

@@ -1,45 +1,26 @@
-using System.Diagnostics;
-
+using Microsoft.Win32;
 namespace Unictrl;
 
-/// Start at login through a logon scheduled task that runs with highest privileges: Unictrl must be
-/// elevated to type into administrator windows, and a task starts it without a UAC prompt.
+/// Per-user startup works for installed and portable copies without administrator access.
 internal static class AutoStart
 {
-    private const string TaskName = "Unictrl";
-
-    public static bool IsEnabled() => !Settings.IsPortable && Schtasks($"/query /tn {TaskName}") == 0;
-
-    public static bool Enable()
+    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private static string Command => "\"" + (Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Unictrl.exe")) + "\" --background";
+    public static bool IsEnabled()
     {
-        if (Settings.IsPortable) return false;
-        var exe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Unictrl.exe");
-        var ok = Schtasks($"/create /tn {TaskName} /tr \"\\\"{exe}\\\" --background\" /sc onlogon /rl highest /it /delay 0000:05 /f") == 0;
-        Log.Write("autostart_enable", $"ok={ok}");
-        return ok;
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return string.Equals(key?.GetValue("Unictrl") as string, Command, StringComparison.OrdinalIgnoreCase);
     }
-
-    public static bool Disable()
-    {
-        if (Settings.IsPortable) return false;
-        var ok = Schtasks($"/delete /tn {TaskName} /f") == 0;
-        Log.Write("autostart_disable", $"ok={ok}");
-        return ok;
-    }
-
-    private static int Schtasks(string arguments)
+    public static bool Enable() => Change(true);
+    public static bool Disable() => Change(false);
+    private static bool Change(bool enabled)
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo("schtasks.exe", arguments)
-            {
-                CreateNoWindow = true, UseShellExecute = false,
-                RedirectStandardOutput = true, RedirectStandardError = true,
-            });
-            if (process is null) return -1;
-            process.WaitForExit(10_000);
-            return process.HasExited ? process.ExitCode : -1;
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+            if (enabled) key.SetValue("Unictrl", Command, RegistryValueKind.String); else key.DeleteValue("Unictrl", false);
+            return IsEnabled() == enabled;
         }
-        catch { return -1; }
+        catch (Exception error) { Log.Write("autostart_failed", error.GetType().Name); return false; }
     }
 }

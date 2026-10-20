@@ -151,9 +151,11 @@
                 <Border Style="{StaticResource CardStyle}" Padding="16,14">
                     <StackPanel Spacing="6">
                         <ToggleSwitch x:Name="AutomaticUpdatesSwitch" Header="Check and download updates automatically" Toggled="OnAutomaticUpdatesToggled" />
+                        <ProgressBar x:Name="UpdateProgress" Maximum="100" Visibility="Collapsed" />
                         <TextBlock x:Name="UpdateStatus" Text="Updates come from your personal fork" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Check for updates" Click="OnCheckUpdate" />
+                            <Button x:Name="CheckUpdateButton" Content="Check for updates" Click="OnCheckUpdate" />
+                            <Button x:Name="CancelUpdateButton" Content="Cancel download" Click="OnCancelUpdate" IsEnabled="False" />
                             <Button x:Name="InstallUpdateButton" Content="Restart and update" Click="OnInstallUpdate" IsEnabled="False" />
                         </StackPanel>
                     </StackPanel>

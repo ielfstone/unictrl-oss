@@ -96,8 +96,10 @@ struct SettingsView: View {
             Section("Software updates") {
                 Toggle("Check and download updates automatically", isOn: $updater.automatic)
                 Text(updater.status).font(.caption).foregroundStyle(.secondary)
+                if let progress = updater.downloadProgress { ProgressView(value: progress) }
                 HStack {
                     Button("Check for updates") { updater.check() }.disabled(updater.busy)
+                    if updater.busy { Button("Cancel download") { updater.cancelDownload() } }
                     if updater.preparedVersion != nil { Button("Restart and update") { updater.install() } }
                 }
             }
