@@ -169,7 +169,12 @@ internal static class FileSelfTest
             using var writer=new DesktopClipboard(_=>{},_=>{});
             observer.SetActive(true,initialized.Set);Check(initialized.Wait(3000),"file clipboard observer");
             using var writerReady=new ManualResetEventSlim();writer.SetActive(true,writerReady.Set);Check(writerReady.Wait(3000),"file clipboard writer");
-            writer.Write(new ClipboardContent(Files:[path]),()=>true);Check(copied.Wait(3000),"native file list roundtrip");writer.Write("file test complete",()=>true);Thread.Sleep(50);
+            writer.Write(new ClipboardContent(Files:[path]),()=>true);Check(copied.Wait(3000),"native file list roundtrip");
+            writer.ClearRemoteFiles(()=>true,expiredOnly:true);writerReady.Reset();writer.BeforeRemoteFileCommand(writerReady.Set);Check(writerReady.Wait(3000),"cache check barrier");
+            Check(IsClipboardFormatAvailable(15),"live cached file preserved");
+            File.Delete(path);writer.ClearRemoteFiles(()=>true,expiredOnly:true);writerReady.Reset();writer.BeforeRemoteFileCommand(writerReady.Set);Check(writerReady.Wait(3000),"cache expiry barrier");
+            Check(!IsClipboardFormatAvailable(15),"expired cached file removed from native clipboard");
+            writer.Write("file test complete",()=>true);Thread.Sleep(50);
         }
         finally{try{Directory.Delete(root,true);}catch{}}
     }

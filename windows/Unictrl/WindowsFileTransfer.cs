@@ -49,7 +49,8 @@ internal sealed class WindowsFileTransfer : IDisposable
         lock(gate)
         {
             if(busy)return; history.CleanCache(all);
-            if(received.Any(p=>!File.Exists(p))) { received=[];var intent=Volatile.Read(ref clipboardIntent);desktop.ClearRemoteFiles(()=>Volatile.Read(ref clipboardIntent)==intent); Report("Temporary clipboard files expired; copy again or use the transfer panel"); }
+            var intent=Volatile.Read(ref clipboardIntent);desktop.ClearRemoteFiles(()=>Volatile.Read(ref clipboardIntent)==intent,expiredOnly:true);
+            if(received.Any(p=>!File.Exists(p))) { received=[]; Report("Temporary clipboard files expired; copy again or use the transfer panel"); }
         }
     }
     private bool Ready => settings.Enabled && settings.ClipboardEnabled && settings.ClipboardFilesEnabled && remoteEnabled && send is not null;
