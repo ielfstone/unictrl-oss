@@ -15,8 +15,9 @@ The keyboard and mouse stay connected to the Mac; Unictrl forwards their input t
 network, encrypted. It feels like Apple's Universal Control, for a Mac and a Windows PC. Both sides are
 native apps: a SwiftUI menu bar app on macOS and a WinUI 3 app on Windows.
 
-Unictrl does one thing: your pointer and your keyboard, across your computers. There is no clipboard
-sharing, file transfer or drag and drop.
+This fork adds four-direction screen layouts and opt-in bidirectional **plain-text clipboard sync** in version 0.2.0. Enable **Share text clipboard** on both computers, wait for **Ready**, then copy new text. Images are planned for 0.3.0; file transfer is a later stage. See the [clipboard roadmap](docs/CLIPBOARD-ROADMAP.zh-Hans.md).
+
+The upstream project focuses on keyboard and pointer sharing. Clipboard sync in this branch is a fork feature.
 
 - Source: https://github.com/enlivatech/unictrl-oss
 - Website: [enliva.org](https://www.enliva.org), Enliva, the maker of Unictrl
@@ -161,7 +162,7 @@ Unictrl brings the same idea to a Mac and a Windows PC. On a Mac with an iPad, b
 one feature, a SwiftUI app and a WinUI 3 app, always encrypted, paired with a code, with the Windows
 pointer speed and physical screen sizes built in. It is independent code, not a fork of those projects.
 
-**Why no clipboard or file transfer?** To do one thing well. Clipboard sync is a separate product.
+**Does this fork support clipboard sharing?** Version 0.2.0 supports new plain-text copies up to 1 MiB after both sides opt in. Images and files are not included in this version.
 
 **Can Windows be the computer with the keyboard and mouse?** Not today: the Mac is always the sender.
 

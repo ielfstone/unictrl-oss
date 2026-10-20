@@ -44,8 +44,10 @@ internal static class ClipboardSelfTest
             Check(received == fromPc, "Windows native copy to Mac peer");
             foreach (var packet in mac.Copy(fromMac)) stream.Write(secure.Seal(ClipboardReplica.Encode(packet)));
             sentBack.Set();
+            var ack = ClipboardReplica.Parse(Read(stream, secure));
+            Check(ack?.Kind == "ack", "native clipboard write confirmed");
             stream.ReadTimeout = 1500;
-            try { Read(stream, secure); throw new InvalidDataException("remote write echoed"); }
+            try { var extra = ClipboardReplica.Parse(Read(stream, secure)); throw new InvalidDataException("remote write echoed: " + extra?.Kind); }
             catch (IOException error) when (error.InnerException is SocketException socket && socket.SocketErrorCode == SocketError.TimedOut) { }
         });
         using var clipboard = new ClipboardSync(settings, text => { if (text.StartsWith("Ready", StringComparison.Ordinal)) ready.Set(); });

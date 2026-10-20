@@ -22,7 +22,7 @@
 
 Windows 向相同 Mac 端口主动建立辅助连接，握手标记 UNICTRC1，携带 clientSalt(32)、设备 UUID(16)、票据(16)。Mac 检查当前控制会话、目标与 10 秒有效期，返回 CLIPOK01 和 serverSalt(32)。双方用原配对密钥、独立随机数和 `unictrl clipboard v1` HKDF 上下文派生新的方向密钥。双方必须交换加密 ready 证明后才能同步；票据只用于一次连接，5 秒内未证明则关闭。键鼠流量不共享该 socket 或加密计数器。
 
-0x33 帧内为 JSON：order / begin / chunk / end。begin 包含 UUID、UTF-8 字节长度和 SHA-256；chunk 的 offset 为字节偏移，data 为最多 8192 字节的 Base64。保留现有 16384 字节密文帧上限。接收方验证总长度、严格 UTF-8、摘要和分块顺序后才写剪贴板。单个接收缓存最多 1 MiB，10 秒未完成即废弃；发送队列有界，新的复制替换旧的待发数据。
+0x33 帧内为 JSON：order / begin / chunk / end / ack。ack 在原生剪贴板写入成功后返回，发送方显示 Ready，传输期间显示 Syncing text。begin 包含 UUID、UTF-8 字节长度和 SHA-256；chunk 的 offset 为字节偏移，data 为最多 8192 字节的 Base64。保留现有 16384 字节密文帧上限。接收方验证总长度、严格 UTF-8、摘要和分块顺序后才写剪贴板。单个接收缓存最多 1 MiB，10 秒未完成即废弃；发送队列有界，新的复制替换旧的待发数据。
 
 Mac 对复制事件分配单调 revision，不依赖两端时钟同步。Windows 本地待确认复制阻止较旧 Mac 数据覆盖；新本地复制或不支持的本地内容会使旧写入失效。原生适配器记录自己写入后的 changeCount/sequence number，不把该写入再发布为本地复制。日志不写入剪贴板正文。已识别的敏感/禁止监视标记会跳过，但不能保证识别所有密码来源。
 

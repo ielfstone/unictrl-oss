@@ -117,6 +117,7 @@ final class MacClipboardSync {
                     timeout.cancel(); ticket = nil; candidate = nil; wire = connection; channel = secure
                     authenticated = true; ready = true; seen = pasteboard.changeCount; status(); continue
                 }
+                if packet.kind == "ack", packet.id == replica.localID { status(); continue }
                 poll() // A newer local copy must win over an older in-flight transfer.
                 let effect = replica.receive(packet)
                 enqueue(effect.packets)
@@ -129,7 +130,7 @@ final class MacClipboardSync {
                     if replica.isCurrent(id) {
                         pasteboard.clearContents()
                         if !pasteboard.setString(text, forType: .string) { onStatus("Clipboard write failed") }
-                        else { status() }
+                        else { enqueue([ClipboardPacket(kind: "ack", id: id)]); status() }
                         seen = pasteboard.changeCount
                     }
                 }
@@ -156,6 +157,7 @@ final class MacClipboardSync {
         let packets = replica.copy(text)
         guard !packets.isEmpty else { replica.invalidateLocal(); output.removeAll { $0.kind != "order" }; onStatus("Text exceeds 1 MiB or is unsupported"); return }
         output.removeAll { $0.kind != "order" }
+        onStatus("Syncing text…")
         enqueue(packets)
     }
     private func enqueue(_ packets: [ClipboardPacket]) {

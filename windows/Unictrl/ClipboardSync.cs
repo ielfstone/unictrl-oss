@@ -109,10 +109,12 @@ internal sealed class ClipboardSync : IDisposable
                     if (current != generation || !ready) break;
                     if (DateTime.UtcNow - incomingAt > TimeSpan.FromSeconds(10)) replica.CancelIncoming();
                     if (packet.Kind == "begin") incomingAt = DateTime.UtcNow;
+                    if (packet.Kind == "ack" && packet.Id == replica.LocalId) { status("Ready · text only"); continue; }
                     var effects = replica.Receive(packet);
                     Enqueue(effects.Packets);
                     if (effects.Text is { } text && effects.Id is { } copyId)
-                        desktop.Write(text, () => { lock (gate) return current == generation && ready && replica.IsCurrent(copyId); });
+                        desktop.Write(text, () => { lock (gate) return current == generation && ready && replica.IsCurrent(copyId); },
+                            () => { lock (gate) { if (current == generation && ready) { Enqueue([new("ack", copyId)]); status("Ready · text only"); } } });
                 }
             }
         }
@@ -167,6 +169,7 @@ internal sealed class ClipboardSync : IDisposable
             var packets = replica.Copy(text);
             if (packets.Count == 0) { replica.InvalidateLocal(); status("Text exceeds 1 MiB or is unsupported"); return; }
             output = new Queue<ClipboardPacket>(output.Where(p => p.Kind == "order"));
+            status("Syncing text…");
             Enqueue(packets);
         }
     }

@@ -59,9 +59,9 @@ Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在
 未安装完整 Xcode 时使用项目自带的 ICNS 图标。
 应用上游默认启用“登录时启动”，可以在 Unictrl 设置中关闭。
 
-源码：https://github.com/enlivatech/unictrl-oss
+源码：https://github.com/ielfstone/unictrl-oss/tree/feature/clipboard-text
 上游版本：v0.1.0；本地版本：0.2.0
-提交：17b9bc0dfad78ee562de66f5b478415947b30cfc
+布局基线：db181b7e0ec03ed271dac5ed6df90b92c4d8b745
 许可证：GPL-3.0；完整许可证见 LICENSE.txt。
 TEXT
 hdiutil create -volname 'Unictrl 0.2.0' -srcfolder "$stage" -format UDZO -ov "$out/Unictrl-0.2.0-macOS-universal.dmg"

@@ -12,7 +12,9 @@
 
 键盘和鼠标一直连在 Mac 上，Unictrl 通过局域网把输入加密转发给 PC。用起来就像苹果的"通用控制"，只不过这次连接的是 Mac 和 Windows。两端都是原生应用：macOS 上是 SwiftUI 菜单栏应用，Windows 上是 WinUI 3 应用。
 
-Unictrl 只做一件事：让你的指针和键盘在多台电脑之间通行。它不做剪贴板共享、文件传输或拖放。
+本 fork 在屏幕上下左右排列修复基础上，新增 0.2.0 **双向纯文本剪贴板同步**。两端开启 **Share text clipboard**、等待 **Ready** 后重新复制文字即可。0.3.0 再增加图片，文件传输后续规划。详见[剪贴板版本路线图](docs/CLIPBOARD-ROADMAP.zh-Hans.md)。
+
+上游项目以键鼠共享为主；本分支的剪贴板功能属于 fork 扩展。
 
 - 源码：https://github.com/enlivatech/unictrl-oss
 - 官网：[enliva.org](https://www.enliva.org)（Unictrl 出品方 Enliva）
@@ -122,7 +124,7 @@ Mac 通过事件监听（event tap）读取输入。指针在 Mac 上时，Unict
 
 **和 Synergy、Barrier、Deskflow 有什么不同？** Unictrl 更小，两端都是原生应用：只有一个功能，一个 SwiftUI 应用加一个 WinUI 3 应用，始终加密，用配对码配对，内置 Windows 原生指针速度和屏幕物理尺寸。它是独立编写的代码，不是这些项目的分支。
 
-**为什么不做剪贴板和文件传输？** 为了把一件事做好。剪贴板同步是另一个独立的产品。
+**这个 fork 支持剪贴板吗？** 0.2.0 支持双方开启后新复制的纯文本，最多 1 MiB；当前版本不包含图片和文件。
 
 **能不能让 Windows 当连接键盘鼠标的那台？** 目前不行，键盘鼠标始终连在 Mac 上。
 

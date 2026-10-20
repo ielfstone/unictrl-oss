@@ -23,7 +23,7 @@ internal sealed class DesktopClipboard : IDisposable
         thread.SetApartmentState(ApartmentState.STA); thread.Start();
     }
     public void SetActive(bool value, Action? initialized = null) => Post(() => { active = value; seen = GetClipboardSequenceNumber(); retries = 0; initialized?.Invoke(); });
-    public void Write(string text, Func<bool> stillCurrent) => Post(() => WriteNow(text, stillCurrent, 0));
+    public void Write(string text, Func<bool> stillCurrent, Action? completed = null) => Post(() => WriteNow(text, stillCurrent, 0, completed));
     private void Post(Action action)
     {
         if (disposed) return;
@@ -92,17 +92,18 @@ internal sealed class DesktopClipboard : IDisposable
         if (GetClipboardSequenceNumber() != sequence) { SetTimer(window, 1, 30, 0); return; }
         seen = sequence; copied(text);
     }
-    private void WriteNow(string text, Func<bool> stillCurrent, int attempt)
+    private void WriteNow(string text, Func<bool> stillCurrent, int attempt, Action? completed)
     {
         Poll(); // Publish/cancel any newer local copy before considering a remote write.
         if (!active || !stillCurrent()) return;
         if (!OpenClipboard(window))
         {
             if (attempt >= 10) { status("Clipboard busy; remote text not applied"); return; }
-            _ = Task.Delay(50).ContinueWith(_ => Post(() => WriteNow(text, stillCurrent, attempt + 1)));
+            _ = Task.Delay(50).ContinueWith(_ => Post(() => WriteNow(text, stillCurrent, attempt + 1, completed)));
             return;
         }
         nint memory = 0;
+        var applied = false;
         try
         {
             if (!stillCurrent() || GetClipboardSequenceNumber() != seen) return;
@@ -113,9 +114,14 @@ internal sealed class DesktopClipboard : IDisposable
             if (pointer == 0) return;
             Marshal.Copy(bytes, 0, pointer, bytes.Length); GlobalUnlock(memory);
             if (!EmptyClipboard() || SetClipboardData(13, memory) == 0) { status("Clipboard write failed"); return; }
-            memory = 0; seen = GetClipboardSequenceNumber(); // OS owns memory; our write is not a local copy.
+            memory = 0; applied = true; // OS owns memory. Sequence is final only after closing the clipboard.
         }
-        finally { if (memory != 0) GlobalFree(memory); CloseClipboard(); }
+        finally
+        {
+            if (memory != 0) GlobalFree(memory);
+            CloseClipboard();
+            if (applied) { seen = GetClipboardSequenceNumber(); completed?.Invoke(); }
+        }
     }
     public void Dispose() { disposed = true; active = false; if (window != 0) Native.PostMessageW(window, 0x0012, 0, 0); }
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
