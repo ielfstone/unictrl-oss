@@ -24,6 +24,9 @@ import Testing
         clipboard.onLocalClipboardChanged = { service.localClipboardChanged() }
         clipboard.onFilesCopied = { service.offer($0, clipboard: true) }
         service.onClipboardWritten = { clipboard.markRemoteFileWrite() }
+        service.beforeRemoteClipboard = { clipboard.poll() }
+        clipboard.isRemoteFileClipboard = { service.isRemoteFileClipboard }
+        clipboard.onRemoteClipboardWritten = { service.remoteClipboardWritten() }
         var clipboardReady = false
         clipboard.onStatus = { if $0.hasPrefix("Ready") { clipboardReady = true } }
         clipboard.configure(enabled: true, selected: peer, paired: [peer])
@@ -61,7 +64,9 @@ import Testing
         for _ in 0..<50 { if clipboardReady { break }; try await Task.sleep(nanoseconds: 10_000_000) }; #expect(clipboardReady)
         for _ in 0..<50 { if service.status.hasPrefix("Files ready") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         board.clearContents(); board.writeObjects([source as NSURL])
-        let offer = try #require(try FileProtocol.decode(await control.readMessage(controlCipher)).offer)
+        var first = try FileProtocol.decode(await control.readMessage(controlCipher))
+        if first.kind == "clear" { first = try FileProtocol.decode(await control.readMessage(controlCipher)) }
+        let offer = try #require(first.offer)
         #expect(offer.mode == "clipboard")
         #expect(!service.busy) // Copy/drop only offers metadata; no file data moves without acceptance.
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "request", id: offer.id, rate: 100, request: UUID().uuidString)))!)
@@ -87,7 +92,8 @@ import Testing
         let incoming = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "received.bin", size: Int64(bytes.count))])
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: incoming)))!)
         for _ in 0..<50 { if !service.incoming.isEmpty { break }; try await Task.sleep(nanoseconds: 10_000_000) }
-        #expect(!service.busy); #expect(board.changeCount == previousBoardCount)
+        #expect(!service.busy); #expect(board.changeCount > previousBoardCount)
+        #expect(board.types?.contains(.fileURL) != true) // A pending offer cannot paste the preceding file.
         #expect(service.tryPaste())
         let receiveTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
         let (inbound, inCipher) = try await openFiles(receiveTicket, port: port, peer: peerBytes, key: key)
@@ -105,10 +111,41 @@ import Testing
         #expect(board.types?.contains(.fileURL) == true)
         #expect(board.string(forType: .string) == nil)
 
+
+        // Repeated new copies, including an unpolled local clipboard change and native metadata churn.
+        for cycle in 0..<6 {
+            if cycle == 2 { board.clearContents(); board.setString("local unpolled copy", forType: .string) }
+            let next = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "cycle-\(cycle).bin", size: Int64(bytes.count))])
+            service.control(try FileProtocol.encode(FileCommand(kind: "offer", offer: next)), from: peer)
+            #expect(board.types?.contains(.fileURL) != true)
+            board.addTypes([NSPasteboard.PasteboardType("com.unictrl.test.metadata")], owner: nil)
+            clipboard.poll() // The OS updating our own file marker must not echo/clear the remote intent.
+            #expect(service.tryPaste())
+            var nextTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
+            while nextTicket.kind == "clear" { nextTicket = try FileProtocol.decode(await control.readMessage(controlCipher)) }
+            #expect(nextTicket.id == next.id)
+            let (connection, cipher) = try await openFiles(nextTicket, port: port, peer: peerBytes, key: key)
+            try await connection.send(cipher.seal(FileProtocol.encode(FileCommand(kind: "begin", index: 0)))!)
+            for offset in stride(from: 0, to: bytes.count, by: FileProtocol.chunkSize) {
+                try await connection.send(cipher.seal(FileProtocol.chunk(index: 0, offset: Int64(offset), bytes: bytes.subdata(in: offset..<min(bytes.count, offset + FileProtocol.chunkSize))))!)
+            }
+            try await connection.send(cipher.seal(FileProtocol.encode(FileCommand(kind: "end", index: 0, hash: fixture.sha256)))!)
+            try await connection.send(cipher.seal(FileProtocol.encode(FileCommand(kind: "complete", id: next.id)))!)
+            #expect(try FileProtocol.decode(await connection.readMessage(cipher)).kind == "received")
+            for _ in 0..<100 { if !service.busy { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+            #expect(service.receivedURLs.first?.lastPathComponent == "cycle-\(cycle).bin")
+            #expect((board.readObjects(forClasses: [NSURL.self]) as? [URL])?.first?.lastPathComponent == "cycle-\(cycle).bin")
+            connection.connection.cancel()
+        }
+        service.control(try FileProtocol.encode(FileCommand(kind: "blocked", reason: "too-large")), from: peer)
+        #expect(service.notice.contains("100 MiB")); #expect(service.tryPaste())
+        #expect(board.types?.contains(.fileURL) != true)
+        service.control(try FileProtocol.encode(FileCommand(kind: "clear")), from: peer)
+        #expect(service.history.count == 8) // One sent, first receive, six repeated receives.
+
         // A newer remote copy must survive completion of an older, already downloading file.
         let oldCopy = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "older.bin", size: Int64(bytes.count))])
         let latestCopy = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "newest.bin", size: Int64(bytes.count))])
-        let unchanged = board.changeCount
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: oldCopy)))!)
         for _ in 0..<50 { if service.incoming.contains("older.bin") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(service.tryPaste())
@@ -119,6 +156,7 @@ import Testing
         try await oldConnection.send(oldCipher.seal(FileProtocol.chunk(index: 0, offset: 0, bytes: bytes.prefix(FileProtocol.chunkSize)))!)
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: latestCopy)))!)
         for _ in 0..<50 { if service.incoming.contains("newest.bin") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        let unchanged = board.changeCount
         #expect(service.tryPaste()) // Swallow repeated paste while busy without losing the new offer.
         for offset in stride(from: FileProtocol.chunkSize, to: bytes.count, by: FileProtocol.chunkSize) {
             try await oldConnection.send(oldCipher.seal(FileProtocol.chunk(index: 0, offset: Int64(offset), bytes: bytes.subdata(in: offset..<min(bytes.count, offset + FileProtocol.chunkSize))))!)

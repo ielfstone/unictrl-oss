@@ -6,7 +6,7 @@ struct MenuPanel: View {
     @ObservedObject var controller: AppController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        ScrollView { VStack(alignment: .leading, spacing: 10) {
             header
             if !controller.accessibilityGranted {
                 PermissionCallout(title: "Accessibility is off",
@@ -26,6 +26,7 @@ struct MenuPanel: View {
                 .help("Arrange screens")
                 devices
             }
+            FileTransferSection(controller: controller, service: controller.files)
             HStack(spacing: 8) {
                 ToggleTile(title: "Reverse Wheel", systemImage: "arrow.up.arrow.down", isOn: $controller.reverseMouseWheel)
                 ToggleTile(title: "Smooth Scroll", systemImage: "scroll", isOn: $controller.smoothScrolling)
@@ -38,7 +39,8 @@ struct MenuPanel: View {
             }
         }
         .padding(12)
-        .frame(width: 300)
+        }
+        .frame(width: 340, height: 680)
     }
 
     private var header: some View {

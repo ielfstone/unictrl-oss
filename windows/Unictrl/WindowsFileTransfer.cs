@@ -6,13 +6,18 @@ using System.Security.Cryptography;
 using System.Text;
 namespace Unictrl;
 
-internal sealed record FileViewState(string Status, string Incoming = "", bool Busy = false, double Progress = 0, bool HasReceived = false);
+internal sealed record FileViewState(string Status, string Incoming = "", bool Busy = false, double Progress = 0, bool HasReceived = false, string Notice = "", string History = "");
 internal sealed class WindowsFileTransfer : IDisposable
 {
     private readonly Settings settings;
     private readonly Action<FileViewState> changed;
     private readonly DesktopClipboard desktop;
     private readonly string receiveDirectory;
+    private readonly TransferHistory history;
+    private readonly Timer cleanup;
+    public Action<string>? Attention { get; set; }
+    private string notice = "";
+    private string? blocked, destination;
     private readonly object gate = new();
     private Action<byte[]>? send;
     private bool remoteEnabled, busy;
@@ -29,13 +34,30 @@ internal sealed class WindowsFileTransfer : IDisposable
     private string[] received = [];
     private readonly FilePasteHook hook;
     public WindowsFileTransfer(Settings settings, DesktopClipboard desktop, Action<FileViewState> changed, string? receiveDirectory = null)
-    { this.settings=settings; this.desktop=desktop; this.changed=changed; this.receiveDirectory=receiveDirectory??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"Downloads","Unictrl Received"); hook=new FilePasteHook(TryPaste); }
+    {
+        this.settings=settings; this.desktop=desktop; this.changed=changed;
+        history=new TransferHistory(receiveDirectory is null ? null : Path.Combine(receiveDirectory,"metadata"));
+        this.receiveDirectory=receiveDirectory??history.Cache;
+        hook=new FilePasteHook(TryPaste);
+        cleanup=new Timer(_=>CleanCache(),null,TimeSpan.FromMinutes(5),TimeSpan.FromMinutes(5));
+    }
+    private void Notify(string text) { notice=text; Report(text); Attention?.Invoke(text); }
+    public void DismissNotice(){lock(gate){notice="";Report("Files ready");}}
+    public void ClearHistory(){lock(gate){history.Clear();Report("Transfer history cleared");}}
+    public void CleanCache(bool all=false)
+    {
+        lock(gate)
+        {
+            if(busy)return; history.CleanCache(all);
+            if(received.Any(p=>!File.Exists(p))) { received=[]; Report("Temporary clipboard files expired; copy again or use the transfer panel"); }
+        }
+    }
     private bool Ready => settings.Enabled && settings.ClipboardEnabled && settings.ClipboardFilesEnabled && remoteEnabled && send is not null;
     private void Send(FileCommand command) { send?.Invoke(FileProtocol.Encode(command)); }
     private void Report(string text,double progress=0)
     {
         var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault();
-        changed(new(text,offer is null ? "" : offer.Summary+" · "+string.Join(", ",offer.Files.Take(3).Select(f=>f.Name)),busy,progress,received.Length>0));
+        changed(new(text,offer is null ? "" : offer.Summary+" · "+string.Join(", ",offer.Files.Take(3).Select(f=>f.Name)),busy,progress,received.Length>0,notice,string.Join("\n\n",history.Records.Select(r=>r.Summary))));
     }
     public void Attach(Action<byte[]> control) { lock(gate){Reset(); send=control; Announce();} }
     public void Detach(){lock(gate){Reset();send=null;remoteEnabled=false;Report("File connection offline");}}
@@ -64,11 +86,24 @@ internal sealed class WindowsFileTransfer : IDisposable
                     try{FileProtocol.Validate(offer);}catch{return;}
                     foreach(var id in offers.Where(p=>p.Value.Mode==offer.Mode).Select(p=>p.Key).ToArray())offers.Remove(id);
                     offers[offer.Id]=offer;
-                    if(offer.Mode=="clipboard"){Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteSequence=GetClipboardSequenceNumber();pasteScheduled=false;}
-                    Report("Files offered · paste or click Receive to transfer");break;
+                    if(offer.Mode=="clipboard")
+                    {
+                        blocked=null; var intent=Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteScheduled=false;
+                        desktop.Write(new ClipboardContent(FileIntent:offer.Id),()=>Volatile.Read(ref clipboardIntent)==intent,
+                            ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==intent)pasteSequence=GetClipboardSequenceNumber();}});
+                        pasteSequence=GetClipboardSequenceNumber();
+                    }
+                    Report("Files offered · paste or click Receive to transfer");if(offer.Mode=="drop")Attention?.Invoke("Incoming files: "+offer.Summary+". Open Unictrl to receive.");break;
+                case "blocked":
+                    LocalClipboardChanged(false);
+                    blocked=command.Reason=="too-large"?"Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file).":"These files cannot be pasted. Open Unictrl to transfer regular files; zip folders first.";
+                    pasteId="blocked";var blockedIntent=Volatile.Read(ref clipboardIntent);
+                    desktop.Write(new ClipboardContent(FileIntent:"blocked"),()=>Volatile.Read(ref clipboardIntent)==blockedIntent,
+                        ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==blockedIntent)pasteSequence=GetClipboardSequenceNumber();}});
+                    Notify(blocked);break;
                 case "clear":
                     foreach(var id in offers.Where(p=>p.Value.Mode=="clipboard").Select(p=>p.Key).ToArray())offers.Remove(id);
-                    Interlocked.Increment(ref clipboardIntent);pasteId=null;pasteScheduled=false;Report("Clipboard file offer cleared");break;
+                    var clearedIntent=Interlocked.Increment(ref clipboardIntent);blocked=null;pasteId=null;pasteScheduled=false;desktop.ClearRemoteFiles(()=>Volatile.Read(ref clipboardIntent)==clearedIntent);Report("Clipboard file offer cleared");break;
                 case "ticket":
                     if(command.Id is not {} ticketId || command.Ticket is null || (busy&&activeId!=ticketId))return;
                     byte[] ticket;try{ticket=Convert.FromBase64String(command.Ticket);}catch{return;}
@@ -79,9 +114,9 @@ internal sealed class WindowsFileTransfer : IDisposable
                     if(source is not null && DateTime.UtcNow-source.Created>TimeSpan.FromMinutes(30))return;
                     var selectedOffer=source?.Offer??incoming!;
                     busy=true;activeId=ticketId;transfer?.Cancel();transfer?.Dispose();transfer=new();
-                    var cancel=transfer.Token;var current=++connectionGeneration;var paste=pendingPaste;var rate=FileProtocol.Rate(settings.FileRateMiB,command.Rate??10);
+                    var cancel=transfer.Token;var current=++connectionGeneration;var paste=pendingPaste;var rate=FileProtocol.Rate(settings.FileRateMiB,command.Rate??10);var directory=destination??receiveDirectory;
                     Report("Connecting file transfer…");
-                    _=Task.Run(()=>Run(ticket,selectedOffer,source,rate,paste,current,cancel));break;
+                    _=Task.Run(()=>Run(ticket,selectedOffer,source,rate,paste,current,directory,cancel));break;
                 case "withdraw":
                     if(command.Id is not {} withdrawn)return;
                     offers.Remove(withdrawn);if(pasteId==withdrawn){Interlocked.Increment(ref clipboardIntent);pasteId=null;pasteScheduled=false;}
@@ -91,14 +126,14 @@ internal sealed class WindowsFileTransfer : IDisposable
         }
     }
     public void RemoteClipboardWritten(){lock(gate){if(pasteId is not null)pasteSequence=GetClipboardSequenceNumber();}}
-    public void LocalClipboardChanged()
+    public void LocalClipboardChanged(bool notify=true)
     {
         lock(gate)
         {
-            Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
+            blocked=null;Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
             foreach(var id in old)sources.Remove(id);pasteId=null;pasteScheduled=false;
             foreach(var id in offers.Where(p=>p.Value.Mode=="clipboard").Select(p=>p.Key).ToArray())offers.Remove(id);
-            if(old.Length>0)Send(new("clear"));
+            if(notify&&Ready)Send(new("clear"));
         }
     }
     public void Offer(string[] paths,bool clipboard=false)
@@ -117,18 +152,25 @@ internal sealed class WindowsFileTransfer : IDisposable
                 sources[offer.Id]=new(offer,paths,infos.Select(f=>f.LastWriteTimeUtc).ToArray(),DateTime.UtcNow);
                 Send(new("offer",Offer:offer));Report("Offered "+offer.Summary+" · waiting for receiver");
             }
-            catch(Exception error){Report(error.Message);}
+            catch(Exception error)
+            {
+                var tooLarge=clipboard && paths.Sum(p=>{try{return new FileInfo(p).Length;}catch{return 0L;}})>FileProtocol.ClipboardLimit;
+                if(clipboard)Send(new("blocked",Reason:tooLarge?"too-large":"unsupported"));
+                Notify(tooLarge?"Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file).":error.Message);
+            }
         }
     }
-    public void Receive()
+    public void Receive(string? directory=null)
     {
-        lock(gate){var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault();if(offer is not null)Request(offer,null);}
+        lock(gate){destination=directory;var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault();if(offer is not null)Request(offer,null);}
     }
     internal bool TryPaste()
     {
         lock(gate)
         {
-            if(!Ready||pasteId is null||GetClipboardSequenceNumber()!=pasteSequence||!offers.TryGetValue(pasteId,out var offer))return false;
+            if(!Ready||pasteId is null||GetClipboardSequenceNumber()!=pasteSequence)return false;
+            if(blocked is {} reason){_=Task.Run(()=>{lock(gate)Notify(reason);});return true;}
+            if(!offers.TryGetValue(pasteId,out var offer))return false;
             if(pasteScheduled||busy)return true;
             pasteScheduled=true;
             var context=new Paste(GetClipboardSequenceNumber(),GetForegroundWindow(),Volatile.Read(ref clipboardIntent));
@@ -138,11 +180,11 @@ internal sealed class WindowsFileTransfer : IDisposable
     private void Request(FileOffer offer,Paste? paste)
     {
         if(!Ready||busy||paste is not null&&paste.Intent!=Volatile.Read(ref clipboardIntent)){pasteScheduled=false;return;}
-        busy=true;activeId=offer.Id;pendingPaste=paste;pendingRequest=Guid.NewGuid().ToString("D").ToUpperInvariant();Send(new("request",Id:offer.Id,Rate:settings.FileRateMiB,Request:pendingRequest));Report("Requesting files…");
+        busy=true;activeId=offer.Id;pendingPaste=paste;if(paste is not null)destination=null;pendingRequest=Guid.NewGuid().ToString("D").ToUpperInvariant();Send(new("request",Id:offer.Id,Rate:settings.FileRateMiB,Request:pendingRequest));Report("Requesting files…");
         var id=activeId;var request=pendingRequest;
         _=Task.Delay(10000).ContinueWith(_=>{lock(gate){if(activeId==id&&pendingRequest==request&&transfer is null){busy=false;activeId=null;pasteScheduled=false;Report("File connection timed out; try Receive again");}}});
     }
-    private async Task Run(byte[] ticket,FileOffer offer,Source? source,int rate,Paste? paste,long current,CancellationToken cancel)
+    private async Task Run(byte[] ticket,FileOffer offer,Source? source,int rate,Paste? paste,long current,string directory,CancellationToken cancel)
     {
         try
         {
@@ -167,26 +209,27 @@ internal sealed class WindowsFileTransfer : IDisposable
             }
             string[] paths=[];
             if(source is not null)await SendFiles(source,stream,cipher,rate,Progress,cancel);
-            else paths=await ReceiveFiles(offer,stream,cipher,receiveDirectory,Progress,cancel);
+            else paths=await ReceiveFiles(offer,stream,cipher,directory,Progress,cancel);
             lock(gate)
             {
                 if(activeId!=offer.Id||current!=connectionGeneration)return;
                 transfer?.Dispose();transfer=null;activeId=null;busy=false;pendingPaste=null;
                 if(paths.Length>0)
                 {
-                    received=paths;offers.Remove(offer.Id);if(pasteId==offer.Id){pasteId=null;pasteScheduled=false;}
+                    received=paths;offers.Remove(offer.Id);if(pasteId==offer.Id)pasteId=null;pasteScheduled=false;
                     if(paste is not null && Volatile.Read(ref clipboardIntent)==paste.Intent && GetClipboardSequenceNumber()==paste.Sequence)
                     {
                         desktop.Write(new ClipboardContent(Files:paths),()=>Volatile.Read(ref clipboardIntent)==paste.Intent && GetClipboardSequenceNumber()==paste.Sequence,
                             ()=>{if(GetForegroundWindow()==paste.Window)FilePasteHook.Replay();});
                     }
                 }
-                Report(source is null?"Files received · saved in Downloads/Unictrl Received":"Files sent",1);
+                history.Add(offer,source is not null,"Completed");
+                Report(source is null?(paste is null?"Files received in your chosen folder":"Files ready to paste · temporary cache (1 hour)"):"Files sent",1);
             }
         }
         catch(Exception error)
         {
-            lock(gate){if(activeId!=offer.Id||current!=connectionGeneration)return;transfer?.Dispose();transfer=null;activeId=null;busy=false;pasteScheduled=false;pendingPaste=null;Report(cancel.IsCancellationRequested?"File transfer cancelled":"File transfer stopped: "+error.Message);}
+            lock(gate){if(activeId!=offer.Id||current!=connectionGeneration)return;transfer?.Dispose();transfer=null;activeId=null;busy=false;pasteScheduled=false;pendingPaste=null;history.Add(offer,source is not null,"Stopped");Notify(cancel.IsCancellationRequested?"File transfer cancelled":"File transfer stopped: "+error.Message);}
         }
     }
     private static async Task Write(NetworkStream stream,SecureChannel cipher,byte[] data,CancellationToken cancel)
@@ -247,8 +290,8 @@ internal sealed class WindowsFileTransfer : IDisposable
         lock(gate){if(notify&&activeId is {} id){if(sources.Remove(id))Send(new("withdraw",Id:id));Send(new("cancel",Id:id));}ResetTransfer();Report("File transfer cancelled");}
     }
     private void ResetTransfer(){connectionGeneration++;Interlocked.Increment(ref clipboardIntent);pendingRequest=null;activeId=null;transfer?.Cancel();transfer?.Dispose();transfer=null;busy=false;pendingPaste=null;pasteScheduled=false;}
-    private void Reset(){ResetTransfer();sources.Clear();offers.Clear();pasteId=null;pasteScheduled=false;}
-    public void Dispose(){lock(gate){Reset();send=null;}hook.Dispose();}
+    private void Reset(){blocked=null;ResetTransfer();sources.Clear();offers.Clear();pasteId=null;pasteScheduled=false;}
+    public void Dispose(){cleanup.Dispose();lock(gate){Reset();send=null;}hook.Dispose();}
     [DllImport("user32.dll")]private static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")]private static extern nint GetForegroundWindow();
 }

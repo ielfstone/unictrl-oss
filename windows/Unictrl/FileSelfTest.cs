@@ -9,7 +9,7 @@ internal static class FileSelfTest
 {
     public static void Run()
     {
-        RunCase(true,false); RunCase(false,false); RunCase(false,true); RunCase(false,false,true); LateTicketAfterCancellation(); NativeFileClipboard();
+        RunCase(true,false); RunCase(false,false); RunCase(false,true); RunCase(false,false,true); LateTicketAfterCancellation(); NativeFileClipboard(); RepeatedNativeIntents();
         Log.Write("files_test","passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list bounded_streaming");
     }
     private static void RunCase(bool fromWindows,bool cancelTransfer,bool supersede=false)
@@ -65,6 +65,7 @@ internal static class FileSelfTest
                     {
                         var replacement=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),"clipboard",[new("newest.bin",small.Length)]);
                         service!.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:replacement))[1..]);
+                        Thread.Sleep(50); beforeClipboard=GetClipboardSequenceNumber();
                         Check(service.TryPaste(),"repeat paste while transferring consumed");
                     }
                     if(cancelTransfer)
@@ -76,7 +77,7 @@ internal static class FileSelfTest
                     Send(stream,cipher,new("complete",Id:offer.Id));Check(FileProtocol.Decode(Read(stream,cipher)).Kind=="received","native receive acknowledged");
                 }
             });
-            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{lastState=state;if(state.Status.StartsWith("File transfer stopped:",StringComparison.Ordinal)){failure=state.Status;finished.Set();}if(state.Status is "Files sent" or "Files received · saved in Downloads/Unictrl Received")finished.Set();},received);
+            using var files=service=new WindowsFileTransfer(settings,desktop,state=>{lastState=state;if(state.Status.StartsWith("File transfer stopped:",StringComparison.Ordinal)){failure=state.Status;finished.Set();}if(state.Status is "Files sent" or "Files received in your chosen folder" or "Files ready to paste · temporary cache (1 hour)")finished.Set();},received);
             files.Attach(data=>{
                 if(data[0]==0x34){filesControl(MessageType.FileCapabilities,[1,1]);return;}
                 var command=FileProtocol.Decode(data);
@@ -96,8 +97,8 @@ internal static class FileSelfTest
                 Check(chunkSent.Wait(8000),"partial chunk sent");Thread.Sleep(100);files.Cancel();
                 files.Receive();Thread.Sleep(100);Check(lastState?.Busy==true,"old cancellation cannot reset immediate retry");files.Cancel();
                 Check(mock.Wait(8000),"cancel closes network");
-                for(var i=0;i<100&&Directory.Exists(received)&&Directory.GetFileSystemEntries(received).Length>0;i++)Thread.Sleep(20);
-                Check(!Directory.Exists(received)||Directory.GetFileSystemEntries(received).Length==0,"cancel removes partial files");
+                for(var i=0;i<100&&Directory.Exists(received)&&Directory.GetDirectories(received,".partial-*").Length>0;i++)Thread.Sleep(20);
+                Check(!Directory.Exists(received)||Directory.GetDirectories(received,".partial-*").Length==0,"cancel removes partial files");
             }
             else
             {
@@ -128,6 +129,35 @@ internal static class FileSelfTest
         files.Receive();Check(requests.Count==2&&requests[1].Request!=first.Request,"retry gets a fresh request ID");
         files.Control(MessageType.FileCommand,late[1..]);Check(connections==0,"old ticket cannot bind to retry");files.Cancel();
     }
+    private static void RepeatedNativeIntents()
+    {
+        WindowsFileTransfer? files=null; using var ready=new ManualResetEventSlim(); using var requested=new ManualResetEventSlim();
+        using var desktop=new DesktopClipboard(_=>files?.LocalClipboardChanged(),_=>{});
+        var settings=new Settings{Enabled=true,ClipboardEnabled=true,ClipboardFilesEnabled=true};
+        FileViewState? state=null; var requests=new List<string>();
+        using var service=files=new WindowsFileTransfer(settings,desktop,s=>state=s);
+        desktop.RemoteFilesChanged=files.RemoteClipboardWritten;
+        desktop.SetActive(true,ready.Set);Check(ready.Wait(3000),"repeat test native ready");
+        files.Attach(data=>{if(data[0]!=0x35)return;var command=FileProtocol.Decode(data);if(command.Kind=="request"){requests.Add(command.Id!);requested.Set();}});
+        files.Control(MessageType.FileCapabilities,[1,1]);
+        for(var i=0;i<12;i++)
+        {
+            ready.Reset(); requested.Reset();
+            var path=Path.Combine(Path.GetTempPath(),"old-file.bin");
+            desktop.Write(new ClipboardContent(Files:[path]),()=>true,()=>{
+                var offer=new FileOffer(Guid.NewGuid().ToString(),"clipboard",[new($"latest-{i}.bin",1)]);
+                desktop.BeforeRemoteFileCommand(()=>{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);ready.Set();});
+            });
+            Check(ready.Wait(3000),"new intent installed");Check(!IsClipboardFormatAvailable(15),"pending intent cleared stale CF_HDROP");
+            Check(files.TryPaste(),"new intent captures paste");Check(requested.Wait(3000),"new intent requested");
+            Check(state?.Incoming.Contains($"latest-{i}.bin")==true,"latest offer selected");files.Cancel();
+        }
+        Check(requests.Distinct().Count()==12,"all repeated copies have independent intents");
+        files.Control(MessageType.FileCommand,FileProtocol.Encode(new("blocked",Reason:"too-large"))[1..]);Thread.Sleep(100);
+        Check(state?.Notice.Contains("100 MiB")==true,"oversize explanation visible");Check(files.TryPaste(),"oversize paste cannot paste old file");
+        desktop.Write("repeat file test complete",()=>true);Thread.Sleep(50);
+    }
+    [DllImport("user32.dll")]private static extern bool IsClipboardFormatAvailable(uint format);
     private static void NativeFileClipboard()
     {
         var root=Path.Combine(Path.GetTempPath(),"Unictrl native files "+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);

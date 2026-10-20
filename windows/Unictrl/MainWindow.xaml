@@ -171,25 +171,16 @@
                             <ComboBoxItem Content="10" Tag="10" /><ComboBoxItem Content="20" Tag="20" />
                             <ComboBoxItem Content="50" Tag="50" /><ComboBoxItem Content="100" Tag="100" />
                         </ComboBox>
-                        <Border x:Name="FileDropZone" AllowDrop="True" DragOver="OnFileDragOver" Drop="OnFilesDropped" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" CornerRadius="8" Padding="16">
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="Drop files here to offer them to the other computer" TextWrapping="Wrap" />
-                                <Button x:Name="ChooseFilesButton" Content="Choose files…" Click="OnChooseFiles" />
-                                <TextBlock Text="The receiver clicks Receive before file data is sent." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
-                            </StackPanel>
-                        </Border>
-                        <TextBlock x:Name="FileStatus" Text="Files off" TextWrapping="Wrap" />
-                        <ProgressBar x:Name="FileProgress" Maximum="100" Visibility="Collapsed" />
-                        <TextBlock x:Name="FileIncoming" TextWrapping="Wrap" />
+                        <Button Content="Open file transfer panel" Click="OnOpenTransferPanel" />
+                        <TextBlock Text="Click the tray icon to send and receive files. Copy/paste ≤100 MiB per batch; panel ≤1 GiB per file, 4 GiB per batch. Zip folders first." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <Expander Header="Transfer history (latest 100)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <TextBlock x:Name="FileHistory" Text="No transfers yet" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </Expander>
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Name="ReceiveFilesButton" Content="Receive files" Click="OnReceiveFiles" IsEnabled="False" />
-                            <Button x:Name="CancelFilesButton" Content="Cancel transfer" Click="OnCancelFiles" IsEnabled="False" />
+                            <Button Content="Clear history" Click="OnClearHistory" />
+                            <Button Content="Clear temporary files" Click="OnClearFileCache" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Name="ShowFilesButton" Content="Show received files" Click="OnShowFiles" IsEnabled="False" />
-                            <Button x:Name="CopyFilesButton" Content="Copy received files" Click="OnCopyFiles" IsEnabled="False" />
-                        </StackPanel>
-                        <TextBlock Text="Copy/paste: 100 MiB per batch. Drop: 1 GiB per file, 4 GiB per batch, up to 32 files. Zip folders first. Paste starts the download; keep the destination app active to finish pasting automatically. Saved in Downloads/Unictrl Received." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock Text="History stores names, sizes, time and result only. Clipboard files clear after 1 hour. Panel transfers save to your chosen folder, without an extra retained copy. Older Downloads/Unictrl Received files are left in place." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
                         <TextBlock x:Name="ClipboardStatus" Text="Off" TextWrapping="Wrap" />
                         <TextBlock Text="Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Enable Share files for file transfers." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>

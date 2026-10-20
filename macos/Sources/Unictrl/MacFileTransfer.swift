@@ -56,19 +56,54 @@ final class MacFileTransfer: ObservableObject {
     private let keyFor: (String) -> String?
     private let board: NSPasteboard
     private let receiveDirectory: URL
+    private let historyStore: TransferHistory
+    @Published private(set) var history: [TransferRecord] = []
+    @Published private(set) var notice = ""
+    var onAttention: ((String) -> Void)?
+    var beforeRemoteClipboard: (() -> Void)?
+    private let marker = UUID().uuidString
+    private static let markerType = NSPasteboard.PasteboardType("com.unictrl.remote-files")
+    private var blocked: String?
+    private var cleanupTimer: Timer?
     private var enabled = false, remoteEnabled: [String: Bool] = [:]
     private var selected: String?
     private var rate = 10
     private struct Source { let offer: FileOffer; let urls: [URL]; let dates: [Date?]; let created: Date }
     private struct Paste { let count: Int; let pid: pid_t? }
-    private struct Grant { let bytes: Data; let offer: FileOffer; let sender: Bool; let expires: Date; let rate: Int; let paste: Paste? }
+    private struct Grant { let bytes: Data; let offer: FileOffer; let sender: Bool; let expires: Date; let rate: Int; let paste: Paste?; let directory: URL }
     private var sources: [String: Source] = [:], offers: [String: FileOffer] = [:]
     private var grant: Grant?, wire: FileWire?, job: Task<Void, Never>?
     private var generation = UUID()
     private let pasteLock = NSLock()
     private var pasteID: String?, pasteCount = 0, pasteScheduled = false, transferBusy = false
     var canReplayPaste: () -> Bool = { true }
-    init(server: PeerServer, keyFor: @escaping (String) -> String?, pasteboard: NSPasteboard = .general, receiveDirectory: URL? = nil) { self.server = server; self.keyFor = keyFor; self.board = pasteboard; self.receiveDirectory = receiveDirectory ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Unictrl Received") }
+    init(server: PeerServer, keyFor: @escaping (String) -> String?, pasteboard: NSPasteboard = .general, receiveDirectory: URL? = nil) {
+        self.server = server; self.keyFor = keyFor; self.board = pasteboard
+        historyStore = TransferHistory(root: receiveDirectory?.appendingPathComponent("metadata"))
+        self.receiveDirectory = receiveDirectory ?? historyStore.cache
+        history = historyStore.records
+        cleanupTimer = Timer(timeInterval: 300, repeats: true) { [weak self] _ in self?.cleanCache() }
+        RunLoop.main.add(cleanupTimer!, forMode: .common)
+    }
+    deinit { cleanupTimer?.invalidate() }
+    var isRemoteFileClipboard: Bool { board.string(forType: Self.markerType) == marker }
+    private func attention(_ text: String) { notice = text; status = text; onAttention?(text) }
+    func dismissNotice() { notice = "" }
+    private func writeIntent() {
+        board.clearContents(); board.setString(marker, forType: Self.markerType); onClipboardWritten?()
+    }
+    func clearHistory() { historyStore.clear(); history = [] }
+    func cleanCache(all: Bool = false) {
+        guard !busy else { return }
+        historyStore.cleanCache(all: all)
+        if receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
+            receivedURLs = []
+            if isRemoteFileClipboard { writeIntent(); attention("Temporary clipboard files expired. Copy the files again, or use the transfer panel.") }
+        }
+    }
+    private func record(_ offer: FileOffer, sent: Bool, result: String) {
+        historyStore.add(offer, sent: sent, result: result); history = historyStore.records
+    }
     private var ready: Bool { enabled && selected.flatMap { remoteEnabled[$0] } == true }
     func configure(enabled: Bool, selected: String?, rate: Int) {
         let changed = self.enabled != enabled || self.selected != selected
@@ -95,11 +130,21 @@ final class MacFileTransfer: ObservableObject {
         guard ready, let command = try? FileProtocol.decode(data) else { return }
         switch command.kind {
         case "offer":
+            beforeRemoteClipboard?()
             guard let offer = command.offer, (try? FileProtocol.validate(offer)) != nil else { return }
             offers = offers.filter { $0.value.mode != offer.mode }; offers[offer.id] = offer
-            if offer.mode == "clipboard" { pasteLock.withLock { pasteID = offer.id; pasteCount = board.changeCount; pasteScheduled = false } }
+            if offer.mode == "clipboard" {
+                blocked = nil; writeIntent()
+                pasteLock.withLock { pasteID = offer.id; pasteCount = board.changeCount; pasteScheduled = false }
+            }
             refreshIncoming(); status = "Files offered · paste or click Receive to transfer"
+            if offer.mode == "drop" { onAttention?("Incoming files: " + incoming + ". Open Unictrl to receive.") }
+        case "blocked":
+            beforeRemoteClipboard?(); localClipboardChanged(notify: false); blocked = command.reason == "too-large" ? "Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file)." : "These files cannot be pasted. Open Unictrl to transfer regular files; zip folders first."
+            writeIntent(); pasteLock.withLock { pasteID = "blocked"; pasteCount = board.changeCount }; attention(blocked!)
         case "clear":
+            beforeRemoteClipboard?()
+            blocked = nil; if isRemoteFileClipboard { writeIntent() }
             offers = offers.filter { $0.value.mode != "clipboard" }; pasteLock.withLock { pasteID = nil; pasteScheduled = false }; refreshIncoming()
         case "request":
             guard let request = command.request, UUID(uuidString: request) != nil, let id = command.id, let source = sources[id], Date().timeIntervalSince(source.created) < 1800 else { return }
@@ -113,11 +158,12 @@ final class MacFileTransfer: ObservableObject {
         }
     }
     func remoteClipboardWritten() { pasteLock.withLock { if pasteID != nil { pasteCount = board.changeCount } } }
-    func localClipboardChanged() {
+    func localClipboardChanged(notify: Bool = true) {
+        blocked = nil
         let old = sources.filter { $0.value.offer.mode == "clipboard" }; for id in old.keys { sources[id] = nil }
         pasteLock.withLock { pasteID = nil; pasteScheduled = false }
         offers = offers.filter { $0.value.mode != "clipboard" }; refreshIncoming()
-        if !old.isEmpty { send(FileCommand(kind: "clear")) }
+        if notify, ready { send(FileCommand(kind: "clear")) }
     }
     func offer(_ urls: [URL], clipboard: Bool = false) {
         guard ready else { status = "Enable files on both computers"; return }
@@ -133,10 +179,15 @@ final class MacFileTransfer: ObservableObject {
             sources = sources.filter { $0.value.offer.mode != offer.mode }
             sources[offer.id] = Source(offer: offer, urls: urls, dates: dates, created: Date())
             send(FileCommand(kind: "offer", offer: offer)); status = "Offered \(offer.summary) · waiting for receiver"
-        } catch { status = error.localizedDescription }
+        } catch {
+            let tooLarge = clipboard && urls.reduce(Int64(0), { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }) > FileProtocol.clipboardLimit
+            let text = tooLarge ? "Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file)." : error.localizedDescription
+            if clipboard { send(FileCommand(kind: "blocked", reason: tooLarge ? "too-large" : "unsupported")) }
+            attention(text)
+        }
     }
     private func refreshIncoming() { incoming = offers.values.sorted { $0.mode > $1.mode }.first.map { $0.summary + " · " + $0.files.prefix(3).map(\.name).joined(separator: ", ") } ?? "" }
-    func receive() { if let offer = offers.values.sorted(by: { $0.mode > $1.mode }).first { receive(offer, paste: nil) } }
+    func receive(to directory: URL? = nil) { if let offer = offers.values.sorted(by: { $0.mode > $1.mode }).first { receive(offer, paste: nil, directory: directory) } }
     func tryPaste() -> Bool {
         let state: (String?, Bool) = pasteLock.withLock {
             guard let id = pasteID else { return (nil, false) }; if pasteScheduled || transferBusy { return (id, true) }
@@ -144,18 +195,20 @@ final class MacFileTransfer: ObservableObject {
         }
         guard let id = state.0 else { return false }; if state.1 { return true }
         DispatchQueue.main.async { [weak self] in
-            guard let self, let offer = self.offers[id], self.board.changeCount == self.pasteCount else { self?.pasteLock.withLock { self?.pasteScheduled = false }; return }
+            guard let self else { return }
+            if id == "blocked", let reason = self.blocked { self.pasteLock.withLock { self.pasteScheduled = false }; self.attention(reason); return }
+            guard let offer = self.offers[id], self.board.changeCount == self.pasteCount else { self.pasteLock.withLock { self.pasteScheduled = false }; return }
             self.receive(offer, paste: Paste(count: self.board.changeCount, pid: NSWorkspace.shared.frontmostApplication?.processIdentifier))
         }
         return true
     }
-    private func receive(_ offer: FileOffer, paste: Paste?) { if busy { pasteLock.withLock { pasteScheduled = false }; return }; issue(offer, sender: false, remoteRate: rate, paste: paste) }
-    private func issue(_ offer: FileOffer, sender: Bool, remoteRate: Int, paste: Paste?, request: String? = nil) {
+    private func receive(_ offer: FileOffer, paste: Paste?, directory: URL? = nil) { if busy { pasteLock.withLock { pasteScheduled = false }; return }; issue(offer, sender: false, remoteRate: rate, paste: paste, directory: directory) }
+    private func issue(_ offer: FileOffer, sender: Bool, remoteRate: Int, paste: Paste?, request: String? = nil, directory: URL? = nil) {
         guard ready, !busy else { return }
         var bytes = Data(count: 16)
         guard bytes.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }) == errSecSuccess else { return }
         busy = true; progress = 0; status = "Connecting file transfer…"
-        let value = Grant(bytes: bytes, offer: offer, sender: sender, expires: Date().addingTimeInterval(10), rate: FileProtocol.rate(rate, remoteRate), paste: paste); grant = value
+        let value = Grant(bytes: bytes, offer: offer, sender: sender, expires: Date().addingTimeInterval(10), rate: FileProtocol.rate(rate, remoteRate), paste: paste, directory: directory ?? receiveDirectory); grant = value
         send(FileCommand(kind: "ticket", id: offer.id, ticket: bytes.base64EncodedString(), rate: value.rate, request: request))
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self, self.grant?.bytes == bytes, self.wire == nil else { return }; self.cancel(); self.status = "File connection timed out; try Receive again"
@@ -173,7 +226,7 @@ final class MacFileTransfer: ObservableObject {
             guard salt.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, 32, $0.baseAddress!) }) == errSecSuccess else { connection.cancel(); return }
             let cipher = SecureChannel(pairingKey: key, clientSalt: Data(data.prefix(32)), serverSalt: salt, isServer: true, context: FileProtocol.context)
             let wire = FileWire(connection, cipher); self.wire = wire
-            let source = self.sources[grant.offer.id], generation = self.generation, directory = self.receiveDirectory
+            let source = self.sources[grant.offer.id], generation = self.generation, directory = grant.directory
             self.job = Task.detached(priority: .utility) { [weak self] in
                 do {
                     try await wire.rawSend(FileProtocol.reply + salt); try await wire.send(FileCommand(kind: "ready", id: grant.offer.id))
@@ -188,22 +241,24 @@ final class MacFileTransfer: ObservableObject {
                     await MainActor.run { [weak self] in
                         guard let self, self.generation == generation else { return }
                         self.busy = false; self.wire = nil; self.job = nil; self.grant = nil; self.progress = 1
-                        self.status = grant.sender ? "Files sent" : "Files received · saved in Downloads/Unictrl Received"
+                        self.status = grant.sender ? "Files sent" : grant.paste == nil ? "Files received in your chosen folder" : "Files ready to paste · temporary cache (1 hour)"
+                        self.record(grant.offer, sent: grant.sender, result: "Completed")
                         if !received.isEmpty {
                             self.receivedURLs = received; self.offers[grant.offer.id] = nil; self.refreshIncoming()
                             if let paste = grant.paste, self.pasteLock.withLock({ self.pasteID == grant.offer.id }), self.board.changeCount == paste.count {
                                 self.board.clearContents()
                                 if self.board.writeObjects(received as [NSURL]) {
+                                    self.board.setString(self.marker, forType: Self.markerType)
                                     self.onClipboardWritten?()
                                     if self.canReplayPaste(), NSWorkspace.shared.frontmostApplication?.processIdentifier == paste.pid { Self.replayPaste() }
                                 } else { self.status = "Files received; use Copy received files to paste" }
                             }
-                            self.pasteLock.withLock { if self.pasteID == grant.offer.id { self.pasteID = nil; self.pasteScheduled = false } }
+                            self.pasteLock.withLock { if self.pasteID == grant.offer.id { self.pasteID = nil }; self.pasteScheduled = false }
                         }
                     }
                 } catch {
                     wire.close()
-                    await MainActor.run { [weak self] in guard let self, self.generation == generation else { return }; self.busy = false; self.wire = nil; self.job = nil; self.grant = nil; self.pasteLock.withLock { self.pasteScheduled = false }; self.status = "File transfer stopped: \(error.localizedDescription)" }
+                    await MainActor.run { [weak self] in guard let self, self.generation == generation else { return }; self.busy = false; self.wire = nil; self.job = nil; self.grant = nil; self.pasteLock.withLock { self.pasteScheduled = false }; self.record(grant.offer, sent: grant.sender, result: "Stopped"); self.attention("File transfer stopped: \(error.localizedDescription)") }
                 }
             }
         }
@@ -259,7 +314,7 @@ final class MacFileTransfer: ObservableObject {
         }
     }
     func copyReceived() {
-        guard !receivedURLs.isEmpty else { return }; board.clearContents(); board.writeObjects(receivedURLs as [NSURL]); onClipboardWritten?()
+        guard !receivedURLs.isEmpty else { return }; board.clearContents(); board.writeObjects(receivedURLs as [NSURL]); board.setString(marker, forType: Self.markerType); onClipboardWritten?()
     }
     func showReceived() { if !receivedURLs.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(receivedURLs) } }
     func cancel(notify: Bool = true) {
@@ -270,5 +325,5 @@ final class MacFileTransfer: ObservableObject {
         generation = UUID(); grant = nil; wire?.close(); wire = nil; job?.cancel(); job = nil; busy = false; progress = 0
         pasteLock.withLock { pasteScheduled = false }; status = "File transfer cancelled"
     }
-    private func reset() { cancel(notify: false); offers = [:]; sources = [:]; incoming = ""; pasteLock.withLock { pasteID = nil; pasteScheduled = false } }
+    private func reset() { blocked = nil; cancel(notify: false); offers = [:]; sources = [:]; incoming = ""; pasteLock.withLock { pasteID = nil; pasteScheduled = false } }
 }

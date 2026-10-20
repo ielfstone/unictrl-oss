@@ -19,6 +19,7 @@ internal sealed class Tray : IDisposable
     private const int CmdOpen = 1, CmdEnabled = 2, CmdStartAtLogin = 3, CmdQuit = 4;
 
     public event Action? OpenRequested;
+    public event Action? PanelRequested;
     public event Action? EnabledToggled;
     public event Action? StartAtLoginToggled;
     public event Action? QuitRequested;
@@ -58,6 +59,13 @@ internal sealed class Tray : IDisposable
         if (window != 0) Update(show ? NimAdd : NimDelete);
     }
 
+    public void Notify(string message)
+    {
+        if (window == 0 || !visible) return;
+        var data = new NotifyIconData { Size = Marshal.SizeOf<NotifyIconData>(), Window = window, Id = 1, Flags = 0x10,
+            InfoTitle = "Unictrl · File transfer", Info = message.Length > 250 ? message[..250] : message, InfoFlags = 1 };
+        Shell_NotifyIconW(NimModify, ref data);
+    }
     private void Run()
     {
         procKeepAlive = WindowProc;
@@ -94,7 +102,7 @@ internal sealed class Tray : IDisposable
         if (message == CallbackMessage)
         {
             var @event = (uint)(lParam & 0xFFFF);
-            if (@event is NinSelect or NinKeySelect) OpenRequested?.Invoke();
+            if (@event is NinSelect or NinKeySelect or 0x405) PanelRequested?.Invoke();
             else if (@event == WmContextMenu) ShowMenu();
             return 0;
         }
@@ -109,8 +117,7 @@ internal sealed class Tray : IDisposable
         Native.AppendMenuW(menu, MfString, CmdOpen, "Open Unictrl");
         Native.AppendMenuW(menu, MfSeparator, 0, null);
         Native.AppendMenuW(menu, MfString | (IsEnabled() ? MfChecked : 0), CmdEnabled, "Enabled");
-        if (!Settings.IsPortable)
-            Native.AppendMenuW(menu, MfString | (StartsAtLogin() ? MfChecked : 0), CmdStartAtLogin, "Start at login");
+        Native.AppendMenuW(menu, MfString | (StartsAtLogin() ? MfChecked : 0), CmdStartAtLogin, "Start at login");
         Native.AppendMenuW(menu, MfSeparator, 0, null);
         Native.AppendMenuW(menu, MfString, CmdQuit, "Quit Unictrl");
         Native.GetCursorPos(out var at);

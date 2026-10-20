@@ -9,8 +9,8 @@
   <key>CFBundleIconFile</key><string>Unictrl</string>
   <key>CFBundleIconName</key><string>Unictrl</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.6.0</string>
-  <key>CFBundleVersion</key><string>8</string>
+  <key>CFBundleShortVersionString</key><string>0.7.0</string>
+  <key>CFBundleVersion</key><string>9</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 Enliva LLC</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>

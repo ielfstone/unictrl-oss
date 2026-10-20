@@ -4,7 +4,7 @@ using System.Text;
 namespace Unictrl;
 
 /// Dedicated STA window. Neither a busy clipboard owner nor conversion blocks input/UI threads.
-internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null, string[]? Files = null);
+internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null, string[]? Files = null, string? FileIntent = null);
 
 internal sealed class DesktopClipboard : IDisposable
 {
@@ -17,8 +17,13 @@ internal sealed class DesktopClipboard : IDisposable
     private bool active, disposed;
     private uint seen;
     private int retries;
-    private uint privateFormat, pngFormat;
-    private bool imagesAllowed;
+    private uint privateFormat, pngFormat, fileMarkerFormat;
+    private readonly byte[] fileMarker = Guid.NewGuid().ToByteArray();
+    private int threadId;
+    public Action? RemoteFilesChanged { get; set; }
+    public void BeforeRemoteFileCommand(Action action) => Post(() => { Poll(); action(); });
+    private bool imagesAllowed, ownFileClipboard;
+    public void ClearRemoteFiles(Func<bool> current) => Post(() => { Poll(); if (ownFileClipboard && current()) Write(new ClipboardContent(FileIntent:"clear"), current); });
     private Action? pendingWrite;
     private int writeQueued;
     public DesktopClipboard(Action<ClipboardContent?> copied, Action<string> status)
@@ -36,11 +41,12 @@ internal sealed class DesktopClipboard : IDisposable
         try
         {
             List<(uint Format, byte[] Bytes)> formats;
-            if (content.Files is { Length: > 0 } paths)
+            if (content.FileIntent is not null) formats = [(fileMarkerFormat, fileMarker)];
+            else if (content.Files is { Length: > 0 } paths)
             {
                 var list = Encoding.Unicode.GetBytes(string.Join('\0', paths) + "\0\0");
                 var drop = new byte[20 + list.Length]; BitConverter.GetBytes(20).CopyTo(drop, 0); BitConverter.GetBytes(1).CopyTo(drop, 16); list.CopyTo(drop, 20);
-                formats = [(15, drop), (RegisterClipboardFormatW("Preferred DropEffect"), BitConverter.GetBytes(1))];
+                formats = [(15, drop), (RegisterClipboardFormatW("Preferred DropEffect"), BitConverter.GetBytes(1)), (fileMarkerFormat, fileMarker)];
             }
             else if (content.Png is { } png)
             {
@@ -57,6 +63,7 @@ internal sealed class DesktopClipboard : IDisposable
     });
     private void PostWrite(Action action)
     {
+        if (Environment.CurrentManagedThreadId == threadId) { action(); return; }
         Interlocked.Exchange(ref pendingWrite, action);
         if (Interlocked.CompareExchange(ref writeQueued, 1, 0) != 0) return;
         Post(() =>
@@ -74,6 +81,7 @@ internal sealed class DesktopClipboard : IDisposable
     }
     private void Run()
     {
+        threadId = Environment.CurrentManagedThreadId;
         proc = WindowProc;
         var name = "UnictrlClipboard" + Guid.NewGuid().ToString("N");
         var wc = new Native.WndClass { ClassName = name, WndProc = Marshal.GetFunctionPointerForDelegate(proc) };
@@ -81,6 +89,7 @@ internal sealed class DesktopClipboard : IDisposable
         window = Native.CreateWindowExW(0, name, "", 0, 0, 0, 0, 0, new nint(-3), 0, 0, 0);
         if (window == 0) { status("Clipboard window unavailable"); return; }
         pngFormat = RegisterClipboardFormatW("PNG");
+        fileMarkerFormat = RegisterClipboardFormatW("Unictrl.RemoteFiles.v1");
         privateFormat = RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing");
         seen = GetClipboardSequenceNumber();
         if (!AddClipboardFormatListener(window)) { status("Clipboard listener unavailable"); return; }
@@ -107,9 +116,11 @@ internal sealed class DesktopClipboard : IDisposable
         }
         ClipboardContent? content = null;
         byte[]? imageBytes = null; uint imageFormat = 0;
+        var ownFiles = false;
         try
         {
-            if (!IsClipboardFormatAvailable(privateFormat))
+            ownFiles = ReadGlobal(fileMarkerFormat, 64) is { } marker && marker.AsSpan().StartsWith(fileMarker);
+            if (!ownFiles && !IsClipboardFormatAvailable(privateFormat))
             {
                 // Images take precedence over a browser's text/URL fallback, even when image sync is off.
                 imageFormat = IsClipboardFormatAvailable(pngFormat) ? pngFormat : IsClipboardFormatAvailable(17) ? 17u : IsClipboardFormatAvailable(8) ? 8u : 0;
@@ -159,7 +170,8 @@ internal sealed class DesktopClipboard : IDisposable
         else if (imageFormat != 0 && imagesAllowed) status("Image unavailable or exceeds limits");
         retries = 0;
         if (GetClipboardSequenceNumber() != sequence) { SetTimer(window, 1, 30, 0); return; }
-        seen = sequence; copied(content);
+        seen = sequence; ownFileClipboard = ownFiles;
+        if (ownFiles) RemoteFilesChanged?.Invoke(); else copied(content);
     }
     private static byte[]? ReadGlobal(uint format, int max)
     {
@@ -207,7 +219,7 @@ internal sealed class DesktopClipboard : IDisposable
             foreach (var format in allocated) if (format.Memory != 0) GlobalFree(format.Memory);
             CloseClipboard();
             seen = GetClipboardSequenceNumber();
-            if (applied) completed?.Invoke();
+            if (applied) { ownFileClipboard = formats.Any(f => f.Format == fileMarkerFormat); completed?.Invoke(); }
         }
     }
     public void Dispose() { disposed = true; active = false; if (window != 0) Native.PostMessageW(window, 0x0012, 0, 0); }

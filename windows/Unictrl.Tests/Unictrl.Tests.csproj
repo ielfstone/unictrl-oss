@@ -9,6 +9,8 @@
     <RootNamespace>Unictrl.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Unictrl\TransferHistory.cs" Link="Linked\TransferHistory.cs" />
+    <Compile Include="..\Unictrl\Settings.cs" Link="Linked\Settings.cs" />
     <Compile Include="..\Unictrl\FileProtocol.cs" Link="Linked\FileProtocol.cs" />
     <None Include="..\..\tests\files\*.json" LinkBase="files" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\Unictrl\UpdateProtocol.cs" Link="Linked\UpdateProtocol.cs" />

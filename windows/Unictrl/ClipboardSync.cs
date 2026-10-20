@@ -28,6 +28,7 @@ internal sealed class ClipboardSync : IDisposable
         this.settings = settings; this.status = status;
         desktop = new DesktopClipboard(LocalCopy, status);
         Files = new WindowsFileTransfer(settings, desktop, fileStatus ?? (_ => { }));
+        desktop.RemoteFilesChanged = Files.RemoteClipboardWritten;
     }
     private bool Enabled => settings.ClipboardEnabled && settings.Enabled && !disposed;
     public void Attach(object sessionOwner, Action<byte[]> send)
@@ -69,7 +70,13 @@ internal sealed class ClipboardSync : IDisposable
         lock (gate)
         {
             if (!ReferenceEquals(owner, sessionOwner)) return;
-            if (type is MessageType.FileCapabilities or MessageType.FileCommand) { Files.Control(type, data); return; }
+            if (type is MessageType.FileCapabilities or MessageType.FileCommand)
+            {
+                // Serialize native clipboard observations before installing a newer remote intent.
+                var session = owner;
+                desktop.BeforeRemoteFileCommand(() => { lock (gate) { if (ReferenceEquals(owner, session)) Files.Control(type, data); } });
+                return;
+            }
             if (type == MessageType.ClipboardCapabilities && data.Length == 2 && data[0] == 1 && data[1] <= 1)
             {
                 remoteEnabled = data[1] == 1;

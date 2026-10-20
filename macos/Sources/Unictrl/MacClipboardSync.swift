@@ -9,6 +9,7 @@ final class MacClipboardSync {
     var onFilesCopied: (([URL]) -> Void)?
     var onLocalClipboardChanged: (() -> Void)?
     var onRemoteClipboardWritten: (() -> Void)?
+    var isRemoteFileClipboard: () -> Bool = { false }
     func markRemoteFileWrite() { seen = pasteboard.changeCount }
     var onStatus: (String) -> Void = { _ in }
     private let server: PeerServer
@@ -182,12 +183,14 @@ final class MacClipboardSync {
         if candidate === connection { candidate = nil; connection.cancel(); return }
         if wire === connection { close(); status() }
     }
-    private func poll() {
+    func poll() {
         let count = pasteboard.changeCount
         guard ready, enabled else { seen = count; return }
         guard count != seen else { return }
         if processingImage { replica.invalidateLocal(); output.removeAll { $0.kind != "order" }; preparing = count; return }
-        seen = count; onLocalClipboardChanged?(); replica.cancelIncoming()
+        seen = count
+        if isRemoteFileClipboard() { onRemoteClipboardWritten?(); return }
+        onLocalClipboardChanged?(); replica.cancelIncoming()
         let types = pasteboard.types ?? []
         preparing = nil; replica.invalidateLocal(); output.removeAll { $0.kind != "order" }
         guard !types.contains(where: {

@@ -16,6 +16,8 @@ public sealed partial class MainWindow : Window
     private readonly ClipboardSync clipboard;
     private readonly AppUpdater updater;
     private readonly Tray tray;
+    private QuickPanel? quickPanel;
+    private FileViewState lastFileState = new("Files off");
     private Receiver? receiver;
     private bool quitting;
     private bool startsAtLogin;
@@ -32,11 +34,8 @@ public sealed partial class MainWindow : Window
         }));
         AutomaticUpdatesSwitch.IsOn = settings.AutomaticUpdates;
         clipboard = new ClipboardSync(settings, text => DispatcherQueue.TryEnqueue(() => ClipboardStatus.Text = text), state => DispatcherQueue.TryEnqueue(() => {
-            FileStatus.Text = state.Status; FileIncoming.Text = state.Incoming;
-            FileProgress.Visibility = state.Busy ? Visibility.Visible : Visibility.Collapsed; FileProgress.Value = state.Progress * 100;
-            ReceiveFilesButton.IsEnabled = !state.Busy && state.Incoming.Length > 0;
-            CancelFilesButton.IsEnabled = state.Busy; ChooseFilesButton.IsEnabled = !state.Busy;
-            ShowFilesButton.IsEnabled = CopyFilesButton.IsEnabled = state.HasReceived;
+            lastFileState = state; FileHistory.Text = state.History.Length == 0 ? "No transfers yet" : state.History;
+            quickPanel?.Update(state);
         }));
         ClipboardFilesSwitch.IsOn = settings.ClipboardFilesEnabled;
         FileRateBox.SelectedIndex = Array.IndexOf(new[] {1,5,10,20,50,100}, settings.FileRateMiB);
@@ -79,6 +78,8 @@ public sealed partial class MainWindow : Window
         tray.IsEnabled = () => settings.Enabled;
         tray.StartsAtLogin = () => startsAtLogin;
         tray.OpenRequested += () => DispatcherQueue.TryEnqueue(ShowWindow);
+        tray.PanelRequested += () => DispatcherQueue.TryEnqueue(() => { EnsureQuickPanel(); quickPanel!.Toggle(); });
+        clipboard.Files.Attention = text => tray.Notify(text);
         tray.EnabledToggled += () => DispatcherQueue.TryEnqueue(() => EnabledSwitch.IsOn = !EnabledSwitch.IsOn);
         tray.StartAtLoginToggled += () => DispatcherQueue.TryEnqueue(() => StartAtLoginSwitch.IsOn = !startsAtLogin);
         tray.QuitRequested += () => DispatcherQueue.TryEnqueue(Quit);
@@ -145,6 +146,15 @@ public sealed partial class MainWindow : Window
         settings.Save();
     }
 
+    private void EnsureQuickPanel()
+    {
+        if (quickPanel is not null) return;
+        quickPanel = new QuickPanel(settings, clipboard.Files, ShowWindow, value => EnabledSwitch.IsOn = value, Quit);
+        quickPanel.Update(lastFileState); quickPanel.UpdateConnection(StatusText.Text);
+    }
+    private void OnOpenTransferPanel(object sender, RoutedEventArgs e) { EnsureQuickPanel(); quickPanel!.Show(); }
+    private void OnClearHistory(object sender, RoutedEventArgs e) => clipboard.Files.ClearHistory();
+    private void OnClearFileCache(object sender, RoutedEventArgs e) => clipboard.Files.CleanCache(true);
     private void ShowWindow()
     {
         AppWindow.Show();
@@ -227,7 +237,7 @@ public sealed partial class MainWindow : Window
         tray.SetTooltip($"Unictrl · {text}");
         DispatcherQueue.TryEnqueue(() =>
         {
-            StatusText.Text = text;
+            StatusText.Text = text; quickPanel?.UpdateConnection(text);
             connected = text.StartsWith("Connected", StringComparison.Ordinal);
             UpdateDetail();
         });
@@ -250,36 +260,6 @@ public sealed partial class MainWindow : Window
     private void OnFileRateChanged(object sender, SelectionChangedEventArgs e)
     {
         if (FileRateBox.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag as string, out var rate)) { settings.FileRateMiB = rate; settings.Save(); }
-    }
-    private void OnReceiveFiles(object sender, RoutedEventArgs e) => clipboard.Files.Receive();
-    private void OnCancelFiles(object sender, RoutedEventArgs e) => clipboard.Files.Cancel();
-    private void OnShowFiles(object sender, RoutedEventArgs e) => clipboard.Files.ShowReceived();
-    private void OnCopyFiles(object sender, RoutedEventArgs e) => clipboard.Files.CopyReceived();
-    private async void OnChooseFiles(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker(); picker.FileTypeFilter.Add("*");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            var files = await picker.PickMultipleFilesAsync(); if (files.Count > 0) clipboard.Files.Offer(files.Select(f => f.Path).ToArray());
-        }
-        catch (Exception error) { FileStatus.Text = error.Message; }
-    }
-    private void OnFileDragOver(object sender, DragEventArgs e)
-    {
-        if (settings.ClipboardFilesEnabled && e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
-        { e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy; e.DragUIOverride.Caption = "Offer files to the paired computer"; }
-        e.Handled = true;
-    }
-    private async void OnFilesDropped(object sender, DragEventArgs e)
-    {
-        try
-        {
-            var items = await e.DataView.GetStorageItemsAsync();
-            if (items.Any(i => i is not Windows.Storage.StorageFile)) { FileStatus.Text = "Zip folders before sending"; return; }
-            clipboard.Files.Offer(items.Select(i => i.Path).ToArray());
-        }
-        catch (Exception error) { FileStatus.Text = error.Message; }
     }
     private void OnClipboardImagesToggled(object sender, RoutedEventArgs e)
     {

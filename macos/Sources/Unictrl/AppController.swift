@@ -194,6 +194,9 @@ import ServiceManagement
         clipboard.onFilesCopied = { [weak self] in self?.files.offer($0, clipboard: true) }
         clipboard.onRemoteClipboardWritten = { [weak self] in self?.files.remoteClipboardWritten() }
         files.onClipboardWritten = { [weak self] in self?.clipboard.markRemoteFileWrite() }
+        files.beforeRemoteClipboard = { [weak self] in self?.clipboard.poll() }
+        clipboard.isRemoteFileClipboard = { [weak self] in self?.files.isRemoteFileClipboard ?? false }
+        files.onAttention = { FileNotice.show($0) }
         files.canReplayPaste = { [weak self] in self?.capture.published.mode == .local }
         capture.filePaste = { [weak self] in self?.files.tryPaste() ?? false }
         clipboard.onStatus = { [weak self] in self?.clipboardStatus = $0 }
