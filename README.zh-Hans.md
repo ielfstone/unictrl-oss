@@ -12,9 +12,9 @@
 
 键盘和鼠标一直连在 Mac 上，Unictrl 通过局域网把输入加密转发给 PC。用起来就像苹果的"通用控制"，只不过这次连接的是 Mac 和 Windows。两端都是原生应用：macOS 上是 SwiftUI 菜单栏应用，Windows 上是 WinUI 3 应用。
 
-本 fork 在屏幕上下左右排列修复基础上，新增 0.3.0 **双向文本和图片剪贴板同步**。两端开启 **Share text clipboard**、等待 **Ready** 后重新复制文字即可。两端另开 **Share images too** 即可同步单张图片/截图（10 MiB PNG / 2000 万像素）；文件传输后续规划。详见[剪贴板版本路线图](docs/CLIPBOARD-ROADMAP.zh-Hans.md)。
+本 fork 在屏幕上下左右排列修复基础上，新增 0.4.0 **双向文本和图片剪贴板同步**。两端开启 **Share text clipboard**、等待 **Ready** 后重新复制文字即可。两端另开 **Share images too** 即可同步单张图片/截图（10 MiB PNG / 2000 万像素）；文件传输后续规划。详见[剪贴板版本路线图](docs/CLIPBOARD-ROADMAP.zh-Hans.md)。
 
-上游项目以键鼠共享为主；本分支的剪贴板功能属于 fork 扩展。
+上游项目以键鼠共享为主；本分支的剪贴板、自动更新属于 fork 扩展。软件启动及每六小时检查本 fork 的稳定发布，验签后后台下载，退出时安装或手动点 Restart and update，保留配对与设置。Mac 使用本机固定个人签名；从旧临时签名切换时仍需授权一次。
 
 - 源码：https://github.com/enlivatech/unictrl-oss
 - 官网：[enliva.org](https://www.enliva.org)（Unictrl 出品方 Enliva）

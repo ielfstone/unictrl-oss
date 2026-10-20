@@ -1,0 +1,57 @@
+name: Publish verified personal release
+on:
+  push:
+    branches: ['distribution/*']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Retrieve and verify packages
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $config = Get-Content distribution/release.json -Raw | ConvertFrom-Json
+          $envelope = Get-Content distribution/update-v1.json -Raw | ConvertFrom-Json
+          $payload = [Convert]::FromBase64String($envelope.payload)
+          $key = [Convert]::FromBase64String($config.publicKey)
+          $rsa = [Security.Cryptography.RSA]::Create()
+          $read = 0
+          $rsa.ImportRSAPublicKey($key, [ref]$read)
+          if (-not $rsa.VerifyData($payload, [Convert]::FromBase64String($envelope.signature), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)) { throw 'Update feed signature invalid.' }
+          $release = [Text.Encoding]::UTF8.GetString($payload) | ConvertFrom-Json
+          if ($release.version -ne $config.version) { throw 'Version mismatch.' }
+          $run = gh api "repos/ielfstone/unictrl-oss/actions/runs/$($config.windowsRun)" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.head_sha -ne $config.sourceCommit) { throw 'Build must pass at the release source commit.' }
+          gh run download $config.windowsRun --repo ielfstone/unictrl-oss --name "Unictrl-$($config.version)-windows-x64-portable" --dir distribution/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot retrieve tested Windows build.' }
+          foreach ($platform in @('macos','macosDmg','windows')) {
+            $asset = $release.$platform
+            $name = [IO.Path]::GetFileName(([Uri]$asset.url).AbsolutePath)
+            $file = if ($platform -ne 'windows') { Join-Path distribution $name } else { Join-Path distribution/windows $name }
+            if ((Get-Item -LiteralPath $file).Length -ne $asset.size -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asset.sha256) { throw "Invalid $platform package." }
+          }
+      - name: Publish complete signed release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $config = Get-Content distribution/release.json -Raw | ConvertFrom-Json
+          $tag = 'v' + $config.version
+          gh release view $tag --repo ielfstone/unictrl-oss 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; preserve the published version.' }
+          gh release create $tag --repo ielfstone/unictrl-oss --target $config.sourceCommit --draft --title "Unictrl $($config.version) · 图片与自动更新" --notes-file distribution/NOTES.zh-Hans.md
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot create draft release.' }
+          gh release upload $tag --repo ielfstone/unictrl-oss distribution/update-v1.json "distribution/Unictrl-$($config.version)-macOS-universal-update.zip" "distribution/Unictrl-$($config.version)-macOS-universal.dmg" "distribution/windows/Unictrl-$($config.version)-windows-x64-portable.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; draft remains unpublished.' }
+          gh release edit $tag --repo ielfstone/unictrl-oss --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot publish the completed release.' }

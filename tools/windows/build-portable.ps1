@@ -86,7 +86,7 @@ foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
 }
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $payload 'Source.zip')
 $buildInfo = [ordered]@{
-    version = '0.4.0'; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.4.0'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
     layoutVersion = 2; feature = 'text and PNG clipboard with signed automatic updates'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }

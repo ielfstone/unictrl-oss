@@ -91,8 +91,12 @@ import Security
             let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundleURL.path, candidate.path, work.path]
             process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
-            try process.run(); AppController.shared.quit()
+            try process.run(); self.candidate = nil; self.work = nil; AppController.shared.quit()
         } catch { status = "Cannot start installer: \(error.localizedDescription)" }
+    }
+    func installOnQuit() -> Bool {
+        guard candidate != nil else { return false }
+        install(); return true
     }
     // Every path is an argv value. No interpolated shell commands and no privacy database changes.
     nonisolated static let helper = """

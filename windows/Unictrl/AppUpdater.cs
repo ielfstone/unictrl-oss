@@ -86,9 +86,9 @@ internal sealed class AppUpdater : IDisposable
             else { Directory.CreateDirectory(Path.GetDirectoryName(destination)!); entry.ExtractToFile(destination, false); }
         }
     }
-    public void Install(Action quit)
+    public bool Install(Action quit)
     {
-        if (staged is null || work is null) return;
+        if (staged is null || work is null) return false;
         try
         {
             var config = Convert.ToBase64String(Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new {
@@ -101,6 +101,7 @@ internal sealed class AppUpdater : IDisposable
             staged = null; work = null; quit();
         }
         catch (Exception error) { status("Cannot start installer: " + error.Message, true); }
+        return true;
     }
     public void Dispose() { timer.Dispose(); lifetime.Cancel(); http.Dispose(); }
     internal const string Helper = """

@@ -175,6 +175,7 @@ public sealed partial class MainWindow : Window
 
     private void Quit()
     {
+        if (updater.Install(Quit)) return;
         quitting = true;
         updater.Dispose();
         CursorHider.Show("quit");

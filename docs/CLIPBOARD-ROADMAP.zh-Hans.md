@@ -48,6 +48,14 @@ Mac 接受 PNG/TIFF，后台解码、编码，在主线程核对 changeCount 后
 
 独立 feature/clipboard-files。先支持显式文件复制，后考虑文件夹；不执行远端剪切源文件删除。使用受控接收目录与临时文件分块落盘，校验长度/摘要后原子完成，禁止绝对路径和父目录跳转。明确文件数、单文件/总容量、磁盘空间、同名冲突策略，提供进度、限速、取消、失败重试与过期清理。文件系统写入与原生文件剪贴板格式另行验证，不复用图片的整块内存缓存。
 
-## 自动更新与权限（下一阶段）
+## 0.4.0 自动更新与权限
 
-用户已选择本机固定自签名用于个人测试。当前 ad-hoc 版本的 designated requirement 是每次编译变化的 cdhash，因此不能保证继承现有授权。转换为固定证书后仍需首次重新授权；未来使用同一证书、bundle ID 与安装路径，验证覆盖更新时的权限连续性。自动更新需校验发布来源、版本及签名，成功后替换应用并重启，保留配对与设置，提供失败回滚。Windows 便携版保留 Data，不依赖当前 Mac 下载 Windows 包。
+独立 feature/auto-update，基于已交付的图片版 afecac6。启动及每六小时自动检查个人 fork 的 GitHub Releases，设置中可关闭或手动检查。发现新版后后台下载，显示“Restart and update”；也会在下一次通过软件菜单退出时安装并重新打开。配对和共享设置保留，不在键鼠会话过程中强制退出。
+
+更新源固定为本 fork 的 latest/download/update-v1.json；清单使用本机 RSA 私钥签署，Mac/Windows 内置公钥验签。只接受 HTTPS、本 fork 对应版本的 Release 地址、严格三段版本和递增升级。下载包必须符合签名清单中的长度与 SHA-256。Mac 额外检查完整包签名、所有架构和原有 designated requirement；Windows 对压缩路径、软链接、条目数、解压大小和程序版本进行检查。
+
+Mac 使用持久的个人自签名证书（非 Apple Developer ID、未公证），bundle ID 为 com.enlivatech.unictrl。证书和私钥位于本机 ~/Library/Application Support/UnictrlBuild，专用钥匙串仅供本地构建；私钥不上传仓库或 CI。不要删除/重建它，否则身份会改变。不能把旧 ad-hoc 授权直接迁移；切换固定签名需手动授权一次，未来同一身份和安装路径下仍需用真实覆盖升级确认 macOS 权限连续性，系统可能另行要求安装授权。
+
+两端将候选程序放在现有程序同一磁盘；退出后保留 .previous 备份、替换并重启。Windows 便携版复制 Data（保留备份原件），不会重新创建配对。安装移动/启动失败会恢复旧目录；不能保证处理启动数分钟后才出现的应用错误，此时保留的 .previous 可供恢复。
+
+发布过程：先通过 Windows 构建与原生自检，记录便携 ZIP 的 SHA-256/长度；Mac 本地构建固定签名 ZIP，使用 tools/releases/sign-update-feed.py 签署清单。发布任务在 Windows runner 下载 Windows 构建产物、验证两包摘要，再向自己的 GitHub Release 发布更新清单及两端包；Windows 包不经过当前 Mac。没有通过测试的包不进入稳定更新源。

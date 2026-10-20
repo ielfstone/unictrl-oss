@@ -358,6 +358,7 @@ import ServiceManagement
     }
 
     func quit() {
+        if AppUpdater.shared.installOnQuit() { return }
         hidpp.restore()
         capture.uninstall()
         clipboard.stop()

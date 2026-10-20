@@ -1,11 +1,11 @@
 #!/bin/sh
-# Local, ad-hoc-signed DMG build with bidirectional text clipboard support.
+# Local, persistently signed DMG build with bidirectional text clipboard support.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out="$root/artifacts"
 mkdir -p "$out"
 cd "$root/macos"
-# The installed macOS 27 CLT lacks SwiftUIMacros; the retained SDK builds the unmodified source.
+# The installed macOS 27 CLT lacks SwiftUIMacros; the retained SDK builds the project source.
 sdk=${UNICTRL_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk}
 for arch in arm64 x86_64; do
     swift build -c release --build-system native --sdk "$sdk" --triple "$arch-apple-macosx15.0" --scratch-path ".build-sdk26-$arch"
@@ -50,6 +50,8 @@ Windows 端也需更新到图片剪贴板版 0.4.0。
 纯文本最多 UTF-8 1 MiB；等待 Ready 后粘贴，只传新复制内容，不传文件或旧剪贴板。保留原有配对，不需要重新配对。
 Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在 Mac 上方”。
 支持拖动任意屏幕并吸附到上下左右四个方向。
+
+自动更新：启动及每六小时后台检查、验签和下载。完成后点 Restart and update，或从软件菜单退出时自动安装并重启。旧程序保留 .previous 备份，配对与设置保留。
 
 首次使用：
 1. 在“系统设置 > 隐私与安全性 > 辅助功能”中允许 Unictrl。
