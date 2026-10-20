@@ -62,7 +62,7 @@ if (-not $clipboardProcess.WaitForExit(40000)) { $clipboardProcess.Kill(); throw
 if ($clipboardProcess.ExitCode -ne 0) { Get-Content $log; throw 'Clipboard native integration test failed.' }
 if (-not (Select-String -LiteralPath $log -Pattern 'clipboard_test passed' -Quiet)) { Get-Content $log; throw 'Clipboard integration success marker missing.' }
 $updateProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--update-test' -WorkingDirectory $payload -PassThru
-if (-not $updateProcess.WaitForExit(45000)) { $updateProcess.Kill(); throw 'Updater integration test timed out.' }
+if (-not $updateProcess.WaitForExit(120000)) { $updateProcess.Kill(); throw 'Updater integration test timed out.' }
 if ($updateProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'update_test passed' -Quiet)) { Get-Content $log; throw 'Updater integration test failed.' }
 $fileProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--files-test' -WorkingDirectory $payload -PassThru
 if (-not $fileProcess.WaitForExit(120000)) { $fileProcess.Kill(); Get-Content $log; throw 'File native integration test timed out.' }

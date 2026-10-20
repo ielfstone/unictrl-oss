@@ -20,10 +20,22 @@ import Testing
         let service = MacFileTransfer(server: server, keyFor: server.keyFor, pasteboard: board, receiveDirectory: root.appendingPathComponent("received"))
         service.canReplayPaste = { false }
         service.configure(enabled: true, selected: peer, rate: 100)
-        server.onConnected = { id, _ in service.connected(id) }; server.onDisconnected = { id, _ in service.disconnected(id) }
-        server.onMessage = { id, data in service.control(data, from: id) }
+        let clipboard = MacClipboardSync(server: server, keyFor: server.keyFor, pasteboard: board)
+        clipboard.onLocalClipboardChanged = { service.localClipboardChanged() }
+        clipboard.onFilesCopied = { service.offer($0, clipboard: true) }
+        service.onClipboardWritten = { clipboard.markRemoteFileWrite() }
+        var clipboardReady = false
+        clipboard.onStatus = { if $0.hasPrefix("Ready") { clipboardReady = true } }
+        clipboard.configure(enabled: true, selected: peer, paired: [peer])
+        server.onConnected = { id, _ in service.connected(id); clipboard.connected(id) }
+        server.onDisconnected = { id, _ in service.disconnected(id); clipboard.disconnected(id) }
+        server.onMessage = { id, data in
+            if data.first == 0x30 || data.first == 0x32 { clipboard.control(data, from: id) }
+            else { service.control(data, from: id) }
+        }
+        server.onClipboardConnection = { clipboard.accept($0) }
         server.onFileConnection = { service.accept($0) }
-        try server.start(); defer { service.cancel(); server.stop(); board.releaseGlobally() }
+        try server.start(); defer { clipboard.stop(); service.cancel(); server.stop(); board.releaseGlobally() }
         let port = try #require(server.boundPort)
         let control = ClipboardTestClient(port: port); try await control.open(); defer { control.connection.cancel() }
         let salt = Data(repeating: 4, count: 32)
@@ -33,10 +45,24 @@ import Testing
         _ = try await control.readMessage(controlCipher)
         var name = MessageWriter(.hello); name.u8(2); name.utf8("FILE-TEST-PC"); try await control.send(controlCipher.seal(name.data)!)
         #expect(try await control.readMessage(controlCipher) == Data([0x34, 1, 1]))
+        #expect(try await control.readMessage(controlCipher) == Data([0x30, 1, 1]))
+        #expect(try await control.readMessage(controlCipher) == Data([0x32, 1, 0]))
         try await control.send(controlCipher.seal(Data([0x34, 1, 1]))!)
+        try await control.send(controlCipher.seal(Data([0x30, 1, 1]))!)
+        try await control.send(controlCipher.seal(Data([0x32, 1, 0]))!)
+        let clipboardTicket = try await control.readMessage(controlCipher)
+        let clipboardConnection = ClipboardTestClient(port: port); try await clipboardConnection.open(); defer { clipboardConnection.connection.cancel() }
+        let clipSalt = Data(repeating: 3, count: 32)
+        try await clipboardConnection.send(MacClipboardSync.magic + clipSalt + peerBytes + clipboardTicket.dropFirst())
+        let clipReply = try await clipboardConnection.read(40)
+        let clipCipher = SecureChannel(pairingKey: key, clientSalt: clipSalt, serverSalt: clipReply.suffix(32), isServer: false, context: ClipboardReplica.context)
+        _ = try await clipboardConnection.readMessage(clipCipher)
+        try await clipboardConnection.send(clipCipher.seal(ClipboardReplica.message(ClipboardPacket(kind: "ready"))!.data)!)
+        for _ in 0..<50 { if clipboardReady { break }; try await Task.sleep(nanoseconds: 10_000_000) }; #expect(clipboardReady)
         for _ in 0..<50 { if service.status.hasPrefix("Files ready") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
-        service.offer([source])
+        board.clearContents(); board.writeObjects([source as NSURL])
         let offer = try #require(try FileProtocol.decode(await control.readMessage(controlCipher)).offer)
+        #expect(offer.mode == "clipboard")
         #expect(!service.busy) // Copy/drop only offers metadata; no file data moves without acceptance.
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "request", id: offer.id, rate: 100)))!)
         let ticket = try FileProtocol.decode(await control.readMessage(controlCipher))
@@ -57,10 +83,11 @@ import Testing
         #expect(!service.busy)
 
         // Incoming clipboard offer is fetched on paste, then replaces text with real local file URLs.
+        let previousBoardCount = board.changeCount
         let incoming = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "received.bin", size: Int64(bytes.count))])
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: incoming)))!)
         for _ in 0..<50 { if !service.incoming.isEmpty { break }; try await Task.sleep(nanoseconds: 10_000_000) }
-        #expect(!service.busy); #expect(board.string(forType: .string) == "baseline text")
+        #expect(!service.busy); #expect(board.changeCount == previousBoardCount)
         #expect(service.tryPaste())
         let receiveTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
         let (inbound, inCipher) = try await openFiles(receiveTicket, port: port, peer: peerBytes, key: key)
@@ -77,6 +104,25 @@ import Testing
         #expect(try Data(contentsOf: service.receivedURLs[0]) == bytes)
         #expect(board.types?.contains(.fileURL) == true)
         #expect(board.string(forType: .string) == nil)
+
+        let cancelledOffer = FileOffer(id: UUID().uuidString, mode: "drop", files: [FileEntry(name: "cancelled.bin", size: Int64(bytes.count))])
+        try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: cancelledOffer)))!)
+        for _ in 0..<50 { if service.incoming.contains("cancelled.bin") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        service.receive()
+        let cancelTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
+        let (partial, partialCipher) = try await openFiles(cancelTicket, port: port, peer: peerBytes, key: key)
+        defer { partial.connection.cancel() }
+        try await partial.send(partialCipher.seal(FileProtocol.encode(FileCommand(kind: "begin", index: 0)))!)
+        try await partial.send(partialCipher.seal(FileProtocol.chunk(index: 0, offset: 0, bytes: bytes.prefix(FileProtocol.chunkSize)))!)
+        for _ in 0..<50 { if service.progress > 0 { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        #expect(service.progress > 0); service.cancel()
+        let receivedDirectory = root.appendingPathComponent("received")
+        for _ in 0..<100 {
+            if !(try FileManager.default.contentsOfDirectory(atPath: receivedDirectory.path)).contains(where: { $0.hasPrefix(".partial-") }) { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(!(try FileManager.default.contentsOfDirectory(atPath: receivedDirectory.path)).contains(where: { $0.hasPrefix(".partial-") }))
+        #expect(try Data(contentsOf: service.receivedURLs[0]) == bytes)
     }
     private func openFiles(_ ticket: FileCommand, port: UInt16, peer: Data, key: String) async throws -> (ClipboardTestClient, SecureChannel) {
         let client = ClipboardTestClient(port: port); try await client.open()

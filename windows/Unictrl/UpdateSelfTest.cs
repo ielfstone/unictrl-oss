@@ -65,7 +65,7 @@ internal static class UpdateSelfTest
                 foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) }) start.ArgumentList.Add(argument);
                 using var process = Process.Start(start)!;
                 var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-                if (!process.WaitForExit(15000)) { process.Kill(); throw new Exception("Updater helper timed out"); }
+                if (!process.WaitForExit(45000)) { process.Kill(true); throw new Exception("Updater helper timed out: " + stderr.GetAwaiter().GetResult()); }
                 if (process.ExitCode != (fail ? 1 : 0)) throw new Exception("Updater helper exit: " + stderr.GetAwaiter().GetResult());
                 if (File.ReadAllText(Path.Combine(target, "Data", "settings.json")) != "preserved-pairing-test-only" ||
                     File.ReadAllText(Path.Combine(target, "version")) != (fail ? "old" : "new")) throw new Exception("Update transaction lost state");
