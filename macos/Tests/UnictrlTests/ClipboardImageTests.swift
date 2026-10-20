@@ -43,7 +43,7 @@ import Testing
         let pc = ClipboardReplica(authority: false); pc.imagesAllowed = true
         #expect(packets.map { pc.receive($0) }.compactMap(\.png).isEmpty)
     }
-    @Test func nativeConversionPreservesAlphaAndRejectsBadPixels() throws {
+    @MainActor @Test func nativeConversionPreservesAlphaAndRejectsBadPixels() throws {
         let png = Data(base64Encoded: try Self.fixture().png)!
         let converted = try #require(ClipboardImage.convert(png))
         let bitmap = try #require(NSBitmapImageRep(data: converted.png))

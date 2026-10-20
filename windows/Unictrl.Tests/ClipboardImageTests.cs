@@ -12,15 +12,15 @@ public class ClipboardImageTests
     [Fact] public void SharedImageFixtureAndBidirectionalTransfer()
     {
         var (png, packets) = Fixture(); var pc = new ClipboardReplica(false) { ImagesAllowed = true }; var mac = new ClipboardReplica(true) { ImagesAllowed = true };
-        Assert.Equal(png, packets.Select(pc.Receive).Last().Png);
-        Assert.Equal(png, pc.CopyImage(png).Select(mac.Receive).Last().Png);
+        Assert.Equal(png, packets.Select(pc.Receive).ToList().Last().Png);
+        Assert.Equal(png, pc.CopyImage(png).Select(mac.Receive).ToList().Last().Png);
         Assert.All(mac.CopyImage(png), p => Assert.True(ClipboardReplica.Encode(p).Length < 16368));
     }
     [Fact] public void ImagesRequireOptInAndTextStillWorks()
     {
         var (png, packets) = Fixture(); var pc = new ClipboardReplica(false);
         Assert.All(packets.Select(pc.Receive), e => Assert.Null(e.Png)); Assert.Empty(pc.CopyImage(png));
-        Assert.Equal("text", new ClipboardReplica(true).Copy("text").Select(new ClipboardReplica(false).Receive).Last().Text);
+        Assert.Equal("text", new ClipboardReplica(true).Copy("text").Select(new ClipboardReplica(false).Receive).ToList().Last().Text);
     }
     [Fact] public void CorruptImageAndNewerLocalTextNeverApply()
     {

@@ -28,7 +28,11 @@ else
     # CFBundleIconName requires Assets.car; use the supplied ICNS without full Xcode.
     /usr/libexec/PlistBuddy -c 'Delete :CFBundleIconName' "$app/Contents/Info.plist"
 fi
-codesign --force --options runtime --sign - "$app"
+# Keep one local certificate across builds so the designated requirement stays stable.
+signing=$(python3 "$root/tools/macos/setup-local-signing.py")
+identity=$(printf '%s' "$signing" | python3 -c 'import json,sys; print(json.load(sys.stdin)["identity"])')
+keychain=$(printf '%s' "$signing" | python3 -c 'import json,sys; print(json.load(sys.stdin)["keychain"])')
+codesign --force --options runtime --sign "$identity" --keychain "$keychain" "$app"
 codesign --verify --strict --verbose=2 "$app"
 plutil -lint "$app/Contents/Info.plist"
 lipo -info "$app/Contents/MacOS/Unictrl"
@@ -54,9 +58,9 @@ Windows 在上、Mac 在下：在设备旁的“位置”菜单选“Windows 在
 4. 点菜单栏的 Unictrl 图标，选 Pair a Windows PC…。
 5. Windows 端也需要安装 Unictrl 并输入配对码。
 
-这是基于上游 v0.1.0 的本地图片剪贴板版 0.3.0，使用 ad-hoc 本地代码签名，未经过 Apple 公证。
+这是基于上游 v0.1.0 的本地图片剪贴板版 0.3.0，使用固定的个人自签名证书，未经过 Apple 公证。
 如果从网络下载后被 macOS 阻止，请在系统设置的“隐私与安全性”中按系统提供的“仍要打开”流程处理。
-重新编译后签名可能变化，届时可能需要重新授予辅助功能或输入监控权限。
+从旧临时签名版本切换时仍需重新授权一次；后续保留同一证书、bundle ID 与安装路径，以验证权限连续性。
 未安装完整 Xcode 时使用项目自带的 ICNS 图标。
 应用上游默认启用“登录时启动”，可以在 Unictrl 设置中关闭。
 

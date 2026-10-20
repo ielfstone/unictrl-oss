@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -16,8 +16,11 @@ enum ClipboardImage {
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination), output.length <= ClipboardReplica.maxImageBytes,
-              let tiff = NSBitmapImageRep(cgImage: image).representation(using: .tiff, properties: [:]) else { return nil }
-        return (output as Data, tiff)
+        guard CGImageDestinationFinalize(destination), output.length <= ClipboardReplica.maxImageBytes else { return nil }
+        let tiff = NSMutableData()
+        guard let tiffDestination = CGImageDestinationCreateWithData(tiff, UTType.tiff.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(tiffDestination, image, nil)
+        guard CGImageDestinationFinalize(tiffDestination) else { return nil }
+        return (output as Data, tiff as Data)
     }
 }

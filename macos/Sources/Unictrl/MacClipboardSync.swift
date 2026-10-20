@@ -14,6 +14,7 @@ final class MacClipboardSync {
     private var imagesEnabled = false
     private var remoteImages: [String: Bool] = [:]
     private let imageQueue = DispatchQueue(label: "unictrl.clipboard.images", qos: .utility)
+    private var processingImage = false
     private var preparing: Int?
     private var receiveCount = 0, receivePercent = -1, sendCount = 0, sendPercent = -1
     private var receivingImage = false
@@ -35,7 +36,8 @@ final class MacClipboardSync {
     init(server: PeerServer, keyFor: @escaping (String) -> String?, pasteboard: NSPasteboard = .general) {
         self.server = server; self.keyFor = keyFor; self.pasteboard = pasteboard
         seen = pasteboard.changeCount
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
+        timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
+        RunLoop.main.add(timer!, forMode: .common)
     }
     func configure(enabled: Bool, images: Bool = false, selected: String?, paired: [String]) {
         let peer = selected.flatMap { paired.contains($0) ? $0 : nil } ?? (paired.count == 1 ? paired.first : nil)
@@ -142,7 +144,8 @@ final class MacClipboardSync {
                 }
                 if packet.kind == "begin" || packet.kind == "chunk" {
                     transferTimer?.invalidate()
-                    transferTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in self?.replica.cancelIncoming() }
+                    transferTimer = Timer(timeInterval: 10, repeats: false) { [weak self] _ in self?.replica.cancelIncoming() }
+                    RunLoop.main.add(transferTimer!, forMode: .common)
                 }
                 if receivingImage, packet.kind == "chunk", receiveCount > 0 {
                     let percent = min(99, (packet.offset ?? 0) * 100 / receiveCount)
@@ -151,11 +154,15 @@ final class MacClipboardSync {
                 if let id = effect.id, replica.isCurrent(id), preparing == nil {
                     if let text = effect.text { apply(id, text: text, connection: connection) }
                     else if let png = effect.png {
+                        guard !processingImage else { onStatus("Image busy; copy again"); continue }
+                        processingImage = true
                         onStatus("Decoding image…")
                         imageQueue.async { [weak self] in
                             let converted = ClipboardImage.convert(png)
                             DispatchQueue.main.async {
-                                guard let self, self.wire === connection, self.replica.isCurrent(id), self.imagesAllowed else { return }
+                                guard let self else { return }
+                                self.processingImage = false
+                                guard self.wire === connection, self.replica.isCurrent(id), self.imagesAllowed else { self.poll(); return }
                                 guard let converted else { self.onStatus("Image is invalid or exceeds limits"); return }
                                 self.apply(id, image: converted, connection: connection)
                             }
@@ -175,6 +182,7 @@ final class MacClipboardSync {
         let count = pasteboard.changeCount
         guard ready, enabled else { seen = count; return }
         guard count != seen else { return }
+        if processingImage { replica.invalidateLocal(); output.removeAll { $0.kind != "order" }; preparing = count; return }
         seen = count; replica.cancelIncoming()
         let types = pasteboard.types ?? []
         preparing = nil; replica.invalidateLocal(); output.removeAll { $0.kind != "order" }
@@ -185,12 +193,14 @@ final class MacClipboardSync {
             guard imagesAllowed, let raw = pasteboard.data(forType: types.contains(.png) ? .png : .tiff), raw.count <= 100_000_000, let connection = wire else {
                 if imagesAllowed { onStatus("Image unavailable or exceeds limits") }; return
             }
-            preparing = count; onStatus("Preparing image…")
+            processingImage = true; preparing = count; onStatus("Preparing image…")
             imageQueue.async { [weak self] in
                 let converted = ClipboardImage.convert(raw)
                 DispatchQueue.main.async {
-                    guard let self, self.ready, self.wire === connection, self.imagesAllowed,
-                          self.preparing == count, self.pasteboard.changeCount == count else { return }
+                    guard let self else { return }
+                    self.processingImage = false
+                    guard self.ready, self.wire === connection, self.imagesAllowed,
+                          self.preparing == count, self.pasteboard.changeCount == count else { self.poll(); return }
                     self.preparing = nil
                     guard let converted else { self.onStatus("Image is invalid, unsupported or exceeds 10 MiB / 20 MP"); return }
                     self.enqueue(self.replica.copyImage(converted.png))

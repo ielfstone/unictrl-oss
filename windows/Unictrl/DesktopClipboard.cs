@@ -19,6 +19,8 @@ internal sealed class DesktopClipboard : IDisposable
     private int retries;
     private uint privateFormat, pngFormat;
     private bool imagesAllowed;
+    private Action? pendingWrite;
+    private int writeQueued;
     public DesktopClipboard(Action<ClipboardContent?> copied, Action<string> status)
     {
         this.copied = copied; this.status = status;
@@ -28,7 +30,7 @@ internal sealed class DesktopClipboard : IDisposable
     public void SetActive(bool value, Action? initialized = null) => Post(() => { active = value; seen = GetClipboardSequenceNumber(); retries = 0; initialized?.Invoke(); });
     public void SetImagesAllowed(bool value) => Post(() => imagesAllowed = value);
     public void Write(string text, Func<bool> stillCurrent, Action? completed = null) => Write(new ClipboardContent(Text: text), stillCurrent, completed);
-    public void Write(ClipboardContent content, Func<bool> stillCurrent, Action? completed = null) => Post(() =>
+    public void Write(ClipboardContent content, Func<bool> stillCurrent, Action? completed = null) => PostWrite(() =>
     {
         if (!active || !stillCurrent()) return;
         try
@@ -47,6 +49,17 @@ internal sealed class DesktopClipboard : IDisposable
         catch (Exception ex) when (ex is ArgumentException or ExternalException or InvalidDataException or OutOfMemoryException)
         { status("Image is invalid or exceeds limits"); }
     });
+    private void PostWrite(Action action)
+    {
+        Interlocked.Exchange(ref pendingWrite, action);
+        if (Interlocked.CompareExchange(ref writeQueued, 1, 0) != 0) return;
+        Post(() =>
+        {
+            var latest = Interlocked.Exchange(ref pendingWrite, null);
+            Interlocked.Exchange(ref writeQueued, 0);
+            latest?.Invoke();
+        });
+    }
     private void Post(Action action)
     {
         if (disposed) return;
