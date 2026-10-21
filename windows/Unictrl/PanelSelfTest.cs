@@ -106,9 +106,10 @@ internal static class PanelSelfTest
         Check(outer.Right - outer.Left == client.Right && outer.Bottom - outer.Top == client.Bottom, "native client and outer size agree");
         Check(Math.Abs(visible.Bottom - area.WorkArea.Y - area.WorkArea.Height) <= 1, "visible panel meets taskbar work-area edge");
         Check(frame.CornerPreference is 2 or -1, "native rounded corner preference");
+        Check(frame.HasRoundedClip, "native window clips opaque square corners");
         var scale = panel.PanelRoot.XamlRoot.RasterizationScale;
         Check(Math.Abs(panel.PanelRoot.ActualWidth * scale - client.Right) <= 1 && Math.Abs(panel.PanelRoot.ActualHeight * scale - client.Bottom) <= 1, "XAML fits actual native client at current DPI");
-        var report = new { window = new { outer.Left, outer.Top, outer.Right, outer.Bottom }, client = new { client.Right, client.Bottom }, visible = new { visible.Left, visible.Top, visible.Right, visible.Bottom }, workArea = area.WorkArea, cornerPreference = frame.CornerPreference, scale, scrollableHeight = panel.MiddleScroll.ScrollableHeight };
+        var report = new { window = new { outer.Left, outer.Top, outer.Right, outer.Bottom }, client = new { client.Right, client.Bottom }, visible = new { visible.Left, visible.Top, visible.Right, visible.Bottom }, workArea = new { area.WorkArea.X, area.WorkArea.Y, area.WorkArea.Width, area.WorkArea.Height }, cornerPreference = frame.CornerPreference, scale, scrollableHeight = panel.MiddleScroll.ScrollableHeight };
         File.WriteAllText(Path.Combine(Settings.Directory, "panel-native-geometry.json"), System.Text.Json.JsonSerializer.Serialize(report));
         try
         {

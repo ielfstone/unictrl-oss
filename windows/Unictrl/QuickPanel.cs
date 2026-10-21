@@ -234,7 +234,7 @@ internal sealed class QuickPanel : Window
             scroll.VerticalScrollBarVisibility = needsScroll ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
             AppWindow.ResizeClient(new SizeInt32((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale)));
             var client = frame.ClientBounds; root.Width = (client.Right - client.Left) / scale; root.Height = (client.Bottom - client.Top) / scale;
-            root.UpdateLayout(); frame.Align(area, (int)Math.Round(8 * scale));
+            root.UpdateLayout(); frame.Round(scale); frame.Align(area, (int)Math.Round(8 * scale));
         }
         finally { fitting = false; }
     }
