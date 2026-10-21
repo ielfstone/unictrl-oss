@@ -155,7 +155,110 @@
                         <TextBlock x:Name="UpdateStatus" Text="Updates come from your personal fork" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button x:Name="CheckUpdateButton" Content="Check for updates" Click="OnCheckUpdate" />
-                            <Button x:Name="CancelUpdateButton…2337 tokens truncated…nTextBlockStyle}" TextWrapping="Wrap"
+                            <Button x:Name="CancelUpdateButton" Content="Cancel download" Click="OnCancelUpdate" IsEnabled="False" />
+                            <Button x:Name="InstallUpdateButton" Content="Restart and update" Click="OnInstallUpdate" IsEnabled="False" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="Shared clipboard" Style="{StaticResource SectionHeaderStyle}" />
+                <Border Style="{StaticResource CardStyle}" Padding="16,14">
+                    <StackPanel Spacing="6">
+                        <ToggleSwitch x:Name="ClipboardSwitch" Header="Share text clipboard" Toggled="OnClipboardToggled" />
+                        <ToggleSwitch x:Name="ClipboardImagesSwitch" Header="Share images too" Toggled="OnClipboardImagesToggled" />
+                        <ToggleSwitch x:Name="ClipboardFilesSwitch" Header="Share files" Toggled="OnClipboardFilesToggled" />
+                        <ComboBox x:Name="FileRateBox" Header="File transfer limit (MiB/s)" SelectionChanged="OnFileRateChanged">
+                            <ComboBoxItem Content="1" Tag="1" /><ComboBoxItem Content="5" Tag="5" />
+                            <ComboBoxItem Content="10" Tag="10" /><ComboBoxItem Content="20" Tag="20" />
+                            <ComboBoxItem Content="50" Tag="50" /><ComboBoxItem Content="100" Tag="100" />
+                        </ComboBox>
+                        <Button Content="Open file transfer panel" Click="OnOpenTransferPanel" />
+                        <TextBlock Text="Click the tray icon to send and receive files. Copy/paste ≤100 MiB per batch; panel ≤1 GiB per file, 4 GiB per batch. Zip folders first. Files within 100 MiB prepare automatically for native paste. Receive saves to Downloads." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <Expander Header="Transfer history (latest 100)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <TextBlock x:Name="FileHistory" Text="No transfers yet" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </Expander>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Clear history" Click="OnClearHistory" />
+                            <Button Content="Clear temporary files" Click="OnClearFileCache" />
+                        </StackPanel>
+                        <TextBlock Text="History stores names, sizes, time and result only. Clipboard files clear after 1 hour. Panel transfers save to your chosen folder, without an extra retained copy. Older Downloads/Unictrl Received files are left in place." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="ClipboardStatus" Text="Off" TextWrapping="Wrap" />
+                        <TextBlock Text="Enable on both computers. Text: 1 MiB. Single images: 10 MiB PNG, 20 megapixels. Wait for Ready before pasting. Enable Share files for file transfers." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="Mouse wheel" Style="{StaticResource SectionHeaderStyle}" />
+                <Border Style="{StaticResource CardStyle}" Padding="16,14">
+                    <StackPanel Spacing="6">
+                        <ToggleSwitch x:Name="ReverseWheelSwitch" Header="Reverse wheel direction" IsEnabled="False" Toggled="OnScrollPreferencesToggled" />
+                        <ToggleSwitch x:Name="SmoothWheelSwitch" Header="Smooth scrolling" IsEnabled="False" Toggled="OnScrollPreferencesToggled" />
+                        <TextBlock x:Name="WheelPreferencesStatus" Text="Connect to an updated Mac to change shared wheel settings" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- General -->
+                <TextBlock Text="General" Style="{StaticResource SectionHeaderStyle}" />
+                <StackPanel Spacing="4">
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE765;" Style="{StaticResource CardIconStyle}" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Keyboard" />
+                                <TextBlock x:Name="KeyboardDetail" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <ComboBox x:Name="KeyboardBox" Grid.Column="2" MinWidth="220" VerticalAlignment="Center"
+                                      SelectionChanged="OnKeyboardChanged">
+                                <ComboBoxItem Tag="mx-keys-legends" Content="Windows layout" />
+                                <ComboBoxItem Tag="mac-positions" Content="Mac layout" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                    <!-- Startup and where the icon shows, in one card to keep the page short. -->
+                    <Border Style="{StaticResource CardStyle}" Padding="16,4">
+                        <Grid RowSpacing="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <FontIcon Glyph="&#xE7E8;" Style="{StaticResource CardIconStyle}" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,8">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Start with Windows" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="Runs in the background after you sign in" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="StartAtLoginSwitch" Grid.Column="2" MinWidth="0" OnContent="On" OffContent="Off"
+                                          Toggled="OnStartAtLoginToggled" VerticalAlignment="Center" />
+
+                            <Rectangle Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="1"
+                                       Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
+                            <StackPanel Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="0,8">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Show in notification area" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="The icon next to the clock" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="TraySwitch" Grid.Row="2" Grid.Column="2" MinWidth="0" OnContent="On" OffContent="Off"
+                                          Toggled="OnTrayToggled" VerticalAlignment="Center" />
+
+                            <Rectangle Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="1"
+                                       Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
+                            <StackPanel Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,8">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Show in taskbar" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            Text="Keep a taskbar button; closing the window minimizes it. With both icons off, open Unictrl from the Start menu." />
                             </StackPanel>
