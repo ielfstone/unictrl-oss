@@ -2,6 +2,7 @@ name: Publish verified personal release
 on:
   push:
     branches: ['distribution/*']
+  workflow_dispatch:
 permissions:
   contents: write
   actions: read
