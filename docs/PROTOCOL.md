@@ -116,3 +116,7 @@ Both clients must be updated for vertical layouts. Pairing and encryption are un
 - Enter/leave edge IDs: 0 left, 1 right, 2 top, 3 bottom. The f32 is now along-edge distance from the screen centre: Y for left/right, X for top/bottom.
 - Enter flag bits: 0 resume, 1 left open, 2 right open, 3 top open, 4 bottom open.
 - Crossings use only the overlap shared by adjacent screens. Windows native pointer and physical pointer modes both support four directions.
+
+### Tray panel wheel preferences (preview)
+
+Authenticated control connection only. `0x37` is Mac → Windows; `0x38` is Windows → Mac. Both carry three bytes: version `1`, reverse wheel (`0`/`1`), smooth scrolling (`0`/`1`). Reject any other size, version or boolean value. The Mac owns and saves these settings, broadcasts updates, and sends a current snapshot on connection. Windows enables its tiles only after receiving a valid snapshot; older peers ignore unknown message types.
