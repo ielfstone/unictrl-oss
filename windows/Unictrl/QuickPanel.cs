@@ -94,6 +94,10 @@ internal sealed class QuickPanel : Window
         Content = new Border { CornerRadius = new(12), BorderThickness = new(1), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 128, 128, 128)), Background = (Brush)Application.Current.Resources["ApplicationPageBackgroundThemeBrush"], Child = root };
         Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !picking) AppWindow.Hide(); };
         AppWindow.Closing += (_, e) => { if (!closing) { e.Cancel = true; AppWindow.Hide(); } };
+        root.ActualThemeChanged += (_, _) => {
+            if (Content is Border surface) surface.Background = new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 248, 248, 248));
+            UpdateWheel(reverse, peer.Scroll?.Reverse ?? false); UpdateWheel(smooth, peer.Scroll?.Smooth ?? false); RenderDevices();
+        };
         root.Loaded += (_, _) => { RenderScreens(); if (shown) Fit(); };
         Update(new("Enable files on both computers")); UpdatePeer(peer);
     }
@@ -118,7 +122,7 @@ internal sealed class QuickPanel : Window
     private void UpdateWheel(Button button, bool on)
     {
         var row = new Grid { ColumnSpacing = 7 }; Columns(row, GridLength.Auto, new(1, GridUnitType.Star));
-        row.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new(13), Background = on ? Pine : Surface(), Child = new FontIcon { Glyph = button == reverse ? "↕" : "≋", FontFamily = new FontFamily("Segoe UI"), FontSize = 14, Foreground = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"] } });
+        row.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new(13), Background = on ? Pine : Surface(), Child = new FontIcon { Glyph = button == reverse ? "↕" : "≋", FontFamily = new FontFamily("Segoe UI"), FontSize = 14, Foreground = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black) } });
         var text = new StackPanel { Spacing = 1 }; text.Children.Add(Text((string)button.Tag, 11, true)); var state = Text(peer.Scroll is null ? "Connect / update Mac" : on ? "On" : "Off", 10); state.Opacity = .65; text.Children.Add(state); Grid.SetColumn(text, 1); row.Children.Add(text); button.Content = row;
         button.IsEnabled = peer.Connected && peer.Scroll is not null;
     }
@@ -138,7 +142,7 @@ internal sealed class QuickPanel : Window
         {
             var mine = screen.Id == (peer.Arrangement?.You ?? settings.DeviceId); var online = mine || peer.Connected && screen.Online;
             var row = new Grid { ColumnSpacing = 8, MinHeight = 27 }; Columns(row, GridLength.Auto, new(1, GridUnitType.Star), GridLength.Auto);
-            row.Children.Add(new Border { Width = 24, Height = 24, CornerRadius = new(12), Background = Surface(), Child = new FontIcon { Glyph = screen.IsMac ? "\uE7F8" : "\uE7F4", FontSize = 12, Foreground = online ? Pine : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] } });
+            row.Children.Add(new Border { Width = 24, Height = 24, CornerRadius = new(12), Background = Surface(), Child = new FontIcon { Glyph = screen.IsMac ? "\uE7F8" : "\uE7F4", FontSize = 12, Foreground = online ? Pine : new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.LightGray : Microsoft.UI.Colors.Gray) } });
             var name = Text(screen.Name, 12); name.TextWrapping = TextWrapping.NoWrap; name.TextTrimming = TextTrimming.CharacterEllipsis; name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 1); row.Children.Add(name);
             var status = !online ? "Offline" : mine ? (peer.ThisPCActive ? "In use · this PC" : "This PC") : screen.IsMac && peer.Quality?.RttMs is { } latency ? $"{latency:0} ms · Connected" : "Connected";
             var badge = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
