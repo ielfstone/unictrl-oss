@@ -1,0 +1,11 @@
+{
+  "version": "0.7.3",
+  "sourceCommit": "d986f6166e466db08d10f65e16457327460fc304",
+  "windowsRun": 39543781790,
+  "publicKey": "MIIBigKCAYEA0ZI9WH2fvSbKi7pdq0XLYS7eztsiXcLa7TnshlhkANyfAE3MtHBk9Ryvnx1eckzZqCtrlVYH64M3sMQvXwme+f7I3NSvdEBs2aukSp+k5QzU8VDj5iIu8t+juop3X9zLtlQm8QykHpyYytnhk5WsvsX+UZ4zAaLBAey/2g1gpYeHR3dFQG2YNbXvQTMEFrm7ou3THnoUhPYG13wYC0T1YZs9EYluo+YVoBoQh6Oyn41MVeP53SZxIR54WVvahxt02byFtY/P506fRvH8gBD5e0w+OhinxulZJ9uMXiHxSOdpsYq5Xs1CjOEAAahNEwpwXMXkez/0uSxuBQx/fvMg2+dmr4rbp2EG+h6g6P3kmLv9JU6BQgI0s5kFEQKV/s4T23SMnbBytuH+qehotAdeptNA8aL1m2qhc1LC/SRCmj/lX/hyr3sShGH7kzyEZW3aKwUVlSyVaTh+m0AbRiZNGMt2i/mGqkrBVz+gwK5UDFLe/tjCHtRH91Y9+6GWQZNpAgMBAAE=",
+  "sourceArchive": {
+    "name": "Unictrl-0.7.3-Source.zip",
+    "size": 3779419,
+    "sha256": "0f2e8e853c755c4eac3ebba3a8e1b1e8dd4237f5743a1595be1e4e68d0bad56a"
+  }
+}
