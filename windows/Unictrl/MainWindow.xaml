@@ -172,7 +172,7 @@
                             <ComboBoxItem Content="50" Tag="50" /><ComboBoxItem Content="100" Tag="100" />
                         </ComboBox>
                         <Button Content="Open file transfer panel" Click="OnOpenTransferPanel" />
-                        <TextBlock Text="Click the tray icon to send and receive files. Copy/paste ≤100 MiB per batch; panel ≤1 GiB per file, 4 GiB per batch. Zip folders first." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock Text="Click the tray icon to send and receive files. Copy/paste ≤100 MiB per batch; panel ≤1 GiB per file, 4 GiB per batch. Zip folders first. Files within 100 MiB prepare automatically for native paste. Receive saves to Downloads." TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
                         <Expander Header="Transfer history (latest 100)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="FileHistory" Text="No transfers yet" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                         </Expander>

@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 namespace Unictrl;
 
-internal sealed record FileViewState(string Status, string Incoming = "", bool Busy = false, double Progress = 0, bool HasReceived = false, string Notice = "", string History = "");
+internal sealed record FileViewState(string Status, string Incoming = "", bool Busy = false, double Progress = 0, bool HasReceived = false, string Notice = "", string History = "", bool CanReceive = false);
 internal sealed class WindowsFileTransfer : IDisposable
 {
     private readonly Settings settings;
@@ -23,8 +23,12 @@ internal sealed class WindowsFileTransfer : IDisposable
     private bool remoteEnabled, busy;
     private readonly Dictionary<string, Source> sources = new();
     private readonly Dictionary<string, FileOffer> offers = new();
+    private readonly Dictionary<string, string[]> prepared = new();
+    private readonly Dictionary<string, string> saveWhenReady = new();
     private sealed record Source(FileOffer Offer, string[] Paths, DateTime[] Dates, DateTime Created);
-    private sealed record Paste(uint Sequence, nint Window, long Intent);
+    private sealed record Paste(uint Sequence, nint Window, long Intent, bool Replay = true);
+    private bool pasteWanted;
+    private nint pasteWindow;
     private long clipboardIntent, connectionGeneration;
     private CancellationTokenSource? transfer;
     private string? activeId, pasteId, pendingRequest;
@@ -58,7 +62,7 @@ internal sealed class WindowsFileTransfer : IDisposable
     private void Report(string text,double progress=0)
     {
         var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault();
-        changed(new(text,offer is null ? "" : offer.Summary+" · "+string.Join(", ",offer.Files.Take(3).Select(f=>f.Name)),busy,progress,received.Length>0,notice,string.Join("\n\n",history.Records.Select(r=>r.Summary))));
+        changed(new(text,offer is null ? "" : offer.Summary+" · "+string.Join(", ",offer.Files.Take(3).Select(f=>f.Name)),busy,progress,received.Length>0,notice,string.Join("\n\n",history.Records.Select(r=>r.Summary)),offer is not null&&(!busy||pendingPaste is not null)));
     }
     public void Attach(Action<byte[]> control) { lock(gate){Reset(); send=control; Announce();} }
     public void Detach(){lock(gate){Reset();send=null;remoteEnabled=false;Report("File connection offline");}}
@@ -89,12 +93,11 @@ internal sealed class WindowsFileTransfer : IDisposable
                     offers[offer.Id]=offer;
                     if(offer.Mode=="clipboard")
                     {
-                        blocked=null; var intent=Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteScheduled=false;
+                        blocked=null; var intent=Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteScheduled=false;pasteWanted=false;pasteWindow=0;pasteSequence=0;prepared.Clear();saveWhenReady.Clear();
                         desktop.Write(new ClipboardContent(FileIntent:offer.Id),()=>Volatile.Read(ref clipboardIntent)==intent,
-                            ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==intent)pasteSequence=GetClipboardSequenceNumber();}});
-                        pasteSequence=GetClipboardSequenceNumber();
+                            ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==intent){pasteSequence=GetClipboardSequenceNumber();PrepareClipboard();}}});
                     }
-                    Report("Files offered · paste or click Receive to transfer");if(offer.Mode=="drop")Attention?.Invoke("Incoming files: "+offer.Summary+". Open Unictrl to receive.");break;
+                    if(offer.Mode=="drop" || !busy)Report(offer.Mode=="clipboard"?"Preparing files for native paste…":"Files offered · click Receive to transfer");if(offer.Mode=="drop")Attention?.Invoke("Incoming files: "+offer.Summary+". Open Unictrl to receive.");break;
                 case "blocked":
                     LocalClipboardChanged(false);
                     blocked=command.Reason=="too-large"?"Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file).":"These files cannot be pasted. Open Unictrl to transfer regular files; zip folders first.";
@@ -126,13 +129,13 @@ internal sealed class WindowsFileTransfer : IDisposable
             }
         }
     }
-    public void RemoteClipboardWritten(){lock(gate){if(pasteId is not null)pasteSequence=GetClipboardSequenceNumber();}}
+    public void RemoteClipboardWritten(){lock(gate){if(pasteId is not null){pasteSequence=GetClipboardSequenceNumber();if(pendingPaste is {} p && p.Intent==Volatile.Read(ref clipboardIntent))pendingPaste=p with { Sequence=pasteSequence };}}}
     public void LocalClipboardChanged(bool notify=true)
     {
         lock(gate)
         {
-            blocked=null;Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
-            foreach(var id in old)sources.Remove(id);pasteId=null;pasteScheduled=false;
+            blocked=null;prepared.Clear();saveWhenReady.Clear();Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
+            foreach(var id in old)sources.Remove(id);pasteId=null;pasteScheduled=false;pasteWanted=false;pasteWindow=0;
             foreach(var id in offers.Where(p=>p.Value.Mode=="clipboard").Select(p=>p.Key).ToArray())offers.Remove(id);
             if(notify&&Ready)Send(new("clear"));
         }
@@ -163,7 +166,56 @@ internal sealed class WindowsFileTransfer : IDisposable
     }
     public void Receive(string? directory=null)
     {
-        lock(gate){destination=directory;var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault();if(offer is not null)Request(offer,null);}
+        lock(gate)
+        {
+            var offer=offers.Values.OrderByDescending(o=>o.Mode).FirstOrDefault(); if(offer is null)return;
+            var folder=directory??DownloadsDirectory();
+            if(prepared.TryGetValue(offer.Id,out var paths)) { SavePrepared(offer,paths,folder);return; }
+            if(busy) { if(activeId==offer.Id&&pendingPaste is not null){saveWhenReady[offer.Id]=folder;Report("Receiving files · will save to Downloads",0);}return; }
+            destination=folder; Request(offer,null);
+        }
+    }
+    private void Consumed(string id)
+    {
+        lock(gate){if(prepared.Remove(id)){offers.Remove(id);Report("Files handed to system paste");}}
+    }
+    private void SavePrepared(FileOffer offer,string[] paths,string folder)
+    {
+        if(busy)return; busy=true;activeId=offer.Id;transfer=new();var cancel=transfer.Token;var current=++connectionGeneration;Report("Saving files to Downloads…");
+        _=Task.Run(async ()=>{
+            string? batch=null;
+            try
+            {
+                Directory.CreateDirectory(folder);batch=Path.Combine(folder,"Unictrl-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(batch);
+                foreach(var path in paths)
+                {
+                    await using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,65536,true);
+                    await using var output=new FileStream(Path.Combine(batch,Path.GetFileName(path)),FileMode.CreateNew,FileAccess.Write,FileShare.None,65536,true);
+                    await input.CopyToAsync(output,cancel);
+                }
+                cancel.ThrowIfCancellationRequested();
+                lock(gate){if(current!=connectionGeneration)return;transfer?.Dispose();transfer=null;activeId=null;offers.Remove(offer.Id);prepared.Remove(offer.Id);saveWhenReady.Remove(offer.Id);busy=false;Report("Saved to Downloads · "+Path.GetFileName(batch));PrepareClipboard();}
+            }
+            catch(Exception ex)
+            {
+                if(batch is not null)try{Directory.Delete(batch,true);}catch{}
+                lock(gate){if(current!=connectionGeneration)return;transfer?.Dispose();transfer=null;activeId=null;busy=false;Notify("Could not save files: "+ex.Message);}
+            }
+        });
+    }
+    private static string DownloadsDirectory()
+    {
+        var id=new Guid("374DE290-123F-4565-9164-39C4925E467B");
+        Marshal.ThrowExceptionForHR(SHGetKnownFolderPath(ref id,0,0,out var pointer));
+        try{return Marshal.PtrToStringUni(pointer)!;}finally{Marshal.FreeCoTaskMem(pointer);}
+    }
+    [DllImport("shell32.dll")]private static extern int SHGetKnownFolderPath(ref Guid folder,uint flags,nint token,out nint path);
+    private void PrepareClipboard()
+    {
+        // Only the latest remote clipboard intent is prepared. An older/UI transfer may finish
+        // first, but can never republish its file paths over a newer clipboard.
+        if(!Ready||busy||pasteId is null||!offers.TryGetValue(pasteId,out var offer)||offer.Mode!="clipboard"||GetClipboardSequenceNumber()!=pasteSequence)return;
+        Request(offer,new Paste(pasteSequence,pasteWindow,Volatile.Read(ref clipboardIntent),pasteWanted));
     }
     internal bool TryPaste()
     {
@@ -172,9 +224,12 @@ internal sealed class WindowsFileTransfer : IDisposable
             if(!Ready||pasteId is null||GetClipboardSequenceNumber()!=pasteSequence)return false;
             if(blocked is {} reason){_=Task.Run(()=>{lock(gate)Notify(reason);});return true;}
             if(!offers.TryGetValue(pasteId,out var offer))return false;
+            pasteWanted=true;pasteWindow=GetForegroundWindow();
+            if(pendingPaste is {} preparing && activeId==offer.Id && preparing.Intent==Volatile.Read(ref clipboardIntent))
+                pendingPaste=preparing with { Window=pasteWindow, Replay=true };
             if(pasteScheduled||busy)return true;
             pasteScheduled=true;
-            var context=new Paste(GetClipboardSequenceNumber(),GetForegroundWindow(),Volatile.Read(ref clipboardIntent));
+            var context=new Paste(GetClipboardSequenceNumber(),pasteWindow,Volatile.Read(ref clipboardIntent));
             _=Task.Run(()=>{lock(gate){if(activeId is null && pasteScheduled && context.Intent==Volatile.Read(ref clipboardIntent) && pasteId==offer.Id)Request(offer,context);}});return true;
         }
     }
@@ -214,18 +269,23 @@ internal sealed class WindowsFileTransfer : IDisposable
             lock(gate)
             {
                 if(activeId!=offer.Id||current!=connectionGeneration)return;
-                transfer?.Dispose();transfer=null;activeId=null;busy=false;pendingPaste=null;
+                paste=pendingPaste;transfer?.Dispose();transfer=null;activeId=null;busy=false;pendingPaste=null;
                 if(paths.Length>0)
                 {
-                    received=paths;offers.Remove(offer.Id);if(pasteId==offer.Id)pasteId=null;pasteScheduled=false;
+                    received=paths;
+                    if(paste is not null && pasteId==offer.Id && Volatile.Read(ref clipboardIntent)==paste.Intent)prepared[offer.Id]=paths;
+                    else offers.Remove(offer.Id);
+                    if(pasteId==offer.Id)pasteId=null;pasteScheduled=false;
                     if(paste is not null && Volatile.Read(ref clipboardIntent)==paste.Intent && GetClipboardSequenceNumber()==paste.Sequence)
                     {
-                        desktop.Write(new ClipboardContent(Files:paths),()=>Volatile.Read(ref clipboardIntent)==paste.Intent && GetClipboardSequenceNumber()==paste.Sequence,
-                            ()=>{if(GetForegroundWindow()==paste.Window)FilePasteHook.Replay();});
+                        desktop.Write(new ClipboardContent(Files:paths,FilesRead:()=>Consumed(offer.Id)),()=>Volatile.Read(ref clipboardIntent)==paste.Intent && GetClipboardSequenceNumber()==paste.Sequence,
+                            ()=>{if(paste.Replay && GetForegroundWindow()==paste.Window)FilePasteHook.Replay();});
                     }
                 }
                 history.Add(offer,source is not null,"Completed");
                 Report(source is null?(paste is null?"Files received in your chosen folder":"Files ready to paste · temporary cache (1 hour)"):"Files sent",1);
+                if(prepared.TryGetValue(offer.Id,out var saved) && saveWhenReady.Remove(offer.Id,out var folder))SavePrepared(offer,saved,folder);
+                PrepareClipboard();
             }
         }
         catch(Exception error)
@@ -291,7 +351,7 @@ internal sealed class WindowsFileTransfer : IDisposable
         lock(gate){if(busy && activeId is {} cancelled && (sources.GetValueOrDefault(cancelled)?.Offer ?? offers.GetValueOrDefault(cancelled)) is {} cancelledOffer)history.Add(cancelledOffer,sources.ContainsKey(cancelled),"Cancelled");if(notify&&activeId is {} id){if(sources.Remove(id))Send(new("withdraw",Id:id));Send(new("cancel",Id:id));}ResetTransfer();Report("File transfer cancelled");}
     }
     private void ResetTransfer(){connectionGeneration++;Interlocked.Increment(ref clipboardIntent);pendingRequest=null;activeId=null;transfer?.Cancel();transfer?.Dispose();transfer=null;busy=false;pendingPaste=null;pasteScheduled=false;}
-    private void Reset(){blocked=null;ResetTransfer();sources.Clear();offers.Clear();pasteId=null;pasteScheduled=false;}
+    private void Reset(){blocked=null;ResetTransfer();sources.Clear();offers.Clear();prepared.Clear();saveWhenReady.Clear();pasteId=null;pasteScheduled=false;pasteWanted=false;pasteWindow=0;}
     public void Dispose(){cleanup.Dispose();lock(gate){Reset();send=null;}hook.Dispose();}
     [DllImport("user32.dll")]private static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")]private static extern nint GetForegroundWindow();

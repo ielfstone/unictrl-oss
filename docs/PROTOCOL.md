@@ -120,3 +120,9 @@ Both clients must be updated for vertical layouts. Pairing and encryption are un
 ### Tray panel wheel preferences (preview)
 
 Authenticated control connection only. `0x37` is Mac → Windows; `0x38` is Windows → Mac. Both carry three bytes: version `1`, reverse wheel (`0`/`1`), smooth scrolling (`0`/`1`). Reject any other size, version or boolean value. The Mac owns and saves these settings, broadcasts updates, and sends a current snapshot on connection. Windows enables its tiles only after receiving a valid snapshot; older peers ignore unknown message types.
+
+### Native file paste and pending inbox (preview)
+
+Clipboard offers within the existing 100 MiB batch limit are prepared in the receiver's expiring cache automatically. Panel/drop offers still require explicit acceptance before any payload transfer. Preparation never overwrites a newer clipboard intent. The pending inbox card survives preparation; Receive saves a separate batch in the user's Downloads directory (with a generated folder name to avoid overwriting existing files). A native clipboard consumer taking the prepared file list retires that pending card. A keyboard paste pressed during preparation resumes after completion only if the destination application and clipboard intent still match. Native file list rendering does no network I/O. Clipboard observers may also request native representations; the protocol has no cross-application paste-completion receipt.
+
+Rejected clipboard copies send the existing `blocked` metadata silently. Only a paste attempt on the receiving system displays the 100 MiB limit/transfer-panel advice. Text, image and file encryption, rate limits and explicit-acceptance panel limits are unchanged.

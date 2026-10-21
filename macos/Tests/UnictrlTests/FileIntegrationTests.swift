@@ -87,14 +87,14 @@ import Testing
         for _ in 0..<50 { if !service.busy { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(!service.busy)
 
-        // Incoming clipboard offer is fetched on paste, then replaces text with real local file URLs.
+        // Clipboard offers prepare in the background, retain the pending card and expose native URLs.
         let previousBoardCount = board.changeCount
         let incoming = FileOffer(id: UUID().uuidString, mode: "clipboard", files: [FileEntry(name: "received.bin", size: Int64(bytes.count))])
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: incoming)))!)
         for _ in 0..<50 { if !service.incoming.isEmpty { break }; try await Task.sleep(nanoseconds: 10_000_000) }
-        #expect(!service.busy); #expect(board.changeCount > previousBoardCount)
+        #expect(service.busy); #expect(board.changeCount > previousBoardCount)
         #expect(board.types?.contains(.fileURL) != true) // A pending offer cannot paste the preceding file.
-        #expect(service.tryPaste())
+        // No keyboard interception: a native menu consumer must be able to paste the result.
         let receiveTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
         let (inbound, inCipher) = try await openFiles(receiveTicket, port: port, peer: peerBytes, key: key)
         defer { inbound.connection.cancel() }
@@ -110,7 +110,10 @@ import Testing
         #expect(try Data(contentsOf: service.receivedURLs[0]) == bytes)
         #expect(board.types?.contains(.fileURL) == true)
         #expect(board.string(forType: .string) == nil)
-
+        #expect(service.incoming.contains("received.bin")) // Cached is not yet accepted or pasted.
+        #expect((board.readObjects(forClasses: [NSURL.self]) as? [URL])?.first == service.receivedURLs.first)
+        for _ in 0..<50 { if service.incoming.isEmpty { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        #expect(service.incoming.isEmpty) // Native paste consumption retires the pending card.
 
         // Repeated new copies, including an unpolled local clipboard change and native metadata churn.
         for cycle in 0..<6 {
@@ -134,7 +137,17 @@ import Testing
             #expect(try FileProtocol.decode(await connection.readMessage(cipher)).kind == "received")
             for _ in 0..<100 { if !service.busy { break }; try await Task.sleep(nanoseconds: 10_000_000) }
             #expect(service.receivedURLs.first?.lastPathComponent == "cycle-\(cycle).bin")
-            #expect((board.readObjects(forClasses: [NSURL.self]) as? [URL])?.first?.lastPathComponent == "cycle-\(cycle).bin")
+            #expect(service.incoming.contains("cycle-\(cycle).bin"))
+            if cycle == 5 {
+                let downloads = root.appendingPathComponent("Downloads")
+                service.receive(to: downloads)
+                for _ in 0..<100 { if !service.busy { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+                #expect(service.status.hasPrefix("Saved to Downloads")); #expect(service.incoming.isEmpty)
+                let batch = try #require(FileManager.default.contentsOfDirectory(at: downloads, includingPropertiesForKeys: nil).first)
+                #expect(try Data(contentsOf: batch.appendingPathComponent("cycle-5.bin")) == bytes)
+            } else {
+                #expect((board.readObjects(forClasses: [NSURL.self]) as? [URL])?.first?.lastPathComponent == "cycle-\(cycle).bin")
+            }
             connection.connection.cancel()
         }
         service.control(try FileProtocol.encode(FileCommand(kind: "blocked", reason: "too-large")), from: peer)
@@ -182,7 +195,7 @@ import Testing
         let cancelledOffer = FileOffer(id: UUID().uuidString, mode: "drop", files: [FileEntry(name: "cancelled.bin", size: Int64(bytes.count))])
         try await control.send(controlCipher.seal(FileProtocol.encode(FileCommand(kind: "offer", offer: cancelledOffer)))!)
         for _ in 0..<50 { if service.incoming.contains("cancelled.bin") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
-        service.receive()
+        service.receive(to: root.appendingPathComponent("received"))
         let cancelTicket = try FileProtocol.decode(await control.readMessage(controlCipher))
         let (partial, partialCipher) = try await openFiles(cancelTicket, port: port, peer: peerBytes, key: key)
         defer { partial.connection.cancel() }

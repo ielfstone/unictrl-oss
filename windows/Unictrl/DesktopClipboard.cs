@@ -4,7 +4,7 @@ using System.Text;
 namespace Unictrl;
 
 /// Dedicated STA window. Neither a busy clipboard owner nor conversion blocks input/UI threads.
-internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null, string[]? Files = null, string? FileIntent = null);
+internal sealed record ClipboardContent(string? Text = null, byte[]? Png = null, string[]? Files = null, string? FileIntent = null, Action? FilesRead = null);
 
 internal sealed class DesktopClipboard : IDisposable
 {
@@ -20,6 +20,9 @@ internal sealed class DesktopClipboard : IDisposable
     private uint privateFormat, pngFormat, fileMarkerFormat;
     private readonly byte[] fileMarker = Guid.NewGuid().ToByteArray();
     private int threadId;
+    private byte[]? deferredFileDrop;
+    private string[]? deferredPaths;
+    private Action? filesRead;
     public Action? RemoteFilesChanged { get; set; }
     public void BeforeRemoteFileCommand(Action action) => Post(() => { Poll(); action(); });
     private bool imagesAllowed, ownFileClipboard;
@@ -28,6 +31,11 @@ internal sealed class DesktopClipboard : IDisposable
         if (!ownFileClipboard || !current()) return;
         if (expiredOnly)
         {
+            if (deferredPaths is {} paths)
+            {
+                if (paths.Any(p => !File.Exists(p))) Write(new ClipboardContent(FileIntent:"clear"), current);
+                return;
+            }
             if (!OpenClipboard(window)) return;
             var expired = false;
             try
@@ -76,7 +84,7 @@ internal sealed class DesktopClipboard : IDisposable
             }
             else if (content.Text is { } text) formats = [(13, Encoding.Unicode.GetBytes(text + '\0'))];
             else return;
-            WriteNow(formats, stillCurrent, 0, completed);
+            WriteNow(formats, stillCurrent, 0, completed, content.FilesRead, content.Files);
         }
         catch (Exception ex) when (ex is ArgumentException or ExternalException or InvalidDataException or OutOfMemoryException)
         { status("Image is invalid or exceeds limits"); }
@@ -120,6 +128,29 @@ internal sealed class DesktopClipboard : IDisposable
     private nint WindowProc(nint hwnd, uint message, nint wParam, nint lParam)
     {
         if (message == Changed || message == TimerMessage) { Poll(); return 0; }
+        if (message == 0x0305 && wParam == 15 && deferredFileDrop is {} bytes) // WM_RENDERFORMAT
+        {
+            // The requesting application already holds the clipboard open. All bytes are cached;
+            // this callback does no network I/O and never opens the clipboard recursively.
+            var memory = GlobalAlloc(0x0042, (nuint)bytes.Length);
+            if (memory != 0)
+            {
+                var pointer = GlobalLock(memory);
+                if (pointer != 0)
+                {
+                    Marshal.Copy(bytes, 0, pointer, bytes.Length); GlobalUnlock(memory);
+                    if (SetClipboardData(15, memory) != 0)
+                    {
+                        memory = 0; deferredFileDrop = null; deferredPaths = null;
+                        var read = filesRead; filesRead = null;
+                        if (read is not null) _ = Task.Run(read);
+                    }
+                }
+                if (memory != 0) GlobalFree(memory);
+            }
+            return 0;
+        }
+        if (message == 0x0307) { deferredFileDrop = null; deferredPaths = null; filesRead = null; return 0; } // WM_DESTROYCLIPBOARD
         if (message == Work) { while (jobs.TryDequeue(out var work)) work(); return 0; }
         return Native.DefWindowProcW(hwnd, message, wParam, lParam);
     }
@@ -201,14 +232,14 @@ internal sealed class DesktopClipboard : IDisposable
         try { var bytes = new byte[(int)size]; Marshal.Copy(pointer, bytes, 0, bytes.Length); return bytes; }
         finally { GlobalUnlock(handle); }
     }
-    private void WriteNow(List<(uint Format, byte[] Bytes)> formats, Func<bool> stillCurrent, int attempt, Action? completed)
+    private void WriteNow(List<(uint Format, byte[] Bytes)> formats, Func<bool> stillCurrent, int attempt, Action? completed, Action? onFilesRead = null, string[]? paths = null)
     {
         Poll(); // Publish/cancel any newer local copy before considering a remote write.
         if (!active || !stillCurrent()) return;
         if (!OpenClipboard(window))
         {
             if (attempt >= 10) { status("Clipboard busy; remote content not applied"); return; }
-            _ = Task.Delay(50).ContinueWith(_ => Post(() => WriteNow(formats, stillCurrent, attempt + 1, completed)));
+            _ = Task.Delay(50).ContinueWith(_ => Post(() => WriteNow(formats, stillCurrent, attempt + 1, completed, onFilesRead, paths)));
             return;
         }
         // Allocate every format before EmptyClipboard so allocation failure preserves the old contents.
@@ -226,9 +257,16 @@ internal sealed class DesktopClipboard : IDisposable
             }
             if (!stillCurrent() || GetClipboardSequenceNumber() != seen) return;
             if (!EmptyClipboard()) { status("Clipboard write failed"); return; }
+            deferredFileDrop = null; deferredPaths = null; filesRead = null;
             for (var i = 0; i < allocated.Count; i++)
             {
                 var format = allocated[i];
+                if (format.Format == 15 && onFilesRead is not null)
+                {
+                    deferredFileDrop = formats.Single(f => f.Format == 15).Bytes; deferredPaths = paths; filesRead = onFilesRead;
+                    SetClipboardData(15, 0); // Advertise the native file type; render cached paths on paste.
+                    continue; // Keep ownership of the unused allocation and free it below.
+                }
                 if (SetClipboardData(format.Format, format.Memory) == 0) { status("Clipboard write failed"); return; }
                 allocated[i] = (format.Format, 0); // OS owns successfully published memory.
             }

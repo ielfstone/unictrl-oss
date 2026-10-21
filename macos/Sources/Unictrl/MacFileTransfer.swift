@@ -63,13 +63,17 @@ final class MacFileTransfer: ObservableObject {
     var beforeRemoteClipboard: (() -> Void)?
     private let marker = UUID().uuidString
     private static let markerType = NSPasteboard.PasteboardType("com.unictrl.remote-files")
+    private var prepared: [String: [URL]] = [:], saveWhenReady: [String: URL] = [:]
+    private var fileProviders: [PreparedFileProvider] = []
+    var canReceive: Bool { !incoming.isEmpty && (!busy || grant?.paste != nil) }
     private var blocked: String?
     private var cleanupTimer: Timer?
     private var enabled = false, remoteEnabled: [String: Bool] = [:]
     private var selected: String?
     private var rate = 10
     private struct Source { let offer: FileOffer; let urls: [URL]; let dates: [Date?]; let created: Date }
-    private struct Paste { let count: Int; let pid: pid_t? }
+    private struct Paste { let count: Int; let pid: pid_t?; var replay = true }
+    private var replayIntent: String?, replayPID: pid_t?
     private struct Grant { let bytes: Data; let offer: FileOffer; let sender: Bool; let expires: Date; let rate: Int; let paste: Paste?; let directory: URL }
     private var sources: [String: Source] = [:], offers: [String: FileOffer] = [:]
     private var grant: Grant?, wire: FileWire?, job: Task<Void, Never>?
@@ -97,8 +101,9 @@ final class MacFileTransfer: ObservableObject {
     func cleanCache(all: Bool = false) {
         guard !busy else { return }
         historyStore.cleanCache(all: all)
-        if receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) { receivedURLs = [] }
-        if isRemoteFileClipboard, let paths = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], paths.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
+        let expired = receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) })
+        if expired { receivedURLs = []; prepared = [:] }
+        if isRemoteFileClipboard, expired {
             writeIntent(); attention("Temporary clipboard files expired. Copy the files again, or use the transfer panel.")
         }
     }
@@ -135,10 +140,11 @@ final class MacFileTransfer: ObservableObject {
             guard let offer = command.offer, (try? FileProtocol.validate(offer)) != nil else { return }
             offers = offers.filter { $0.value.mode != offer.mode }; offers[offer.id] = offer
             if offer.mode == "clipboard" {
-                blocked = nil; writeIntent()
-                pasteLock.withLock { pasteID = offer.id; pasteCount = board.changeCount; pasteScheduled = false }
+                blocked = nil; prepared = [:]; saveWhenReady = [:]; writeIntent()
+                pasteLock.withLock { pasteID = offer.id; pasteCount = board.changeCount; pasteScheduled = false }; replayIntent = nil; replayPID = nil
+                prepareClipboard()
             }
-            refreshIncoming(); status = "Files offered · paste or click Receive to transfer"
+            refreshIncoming(); if offer.mode == "drop" || !busy { status = offer.mode == "clipboard" ? "Preparing files for native paste…" : "Files offered · click Receive to transfer" }
             if offer.mode == "drop" { onAttention?("Incoming files: " + incoming + ". Open Unictrl to receive.") }
         case "blocked":
             beforeRemoteClipboard?(); localClipboardChanged(notify: false); blocked = command.reason == "too-large" ? "Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file)." : "These files cannot be pasted. Open Unictrl to transfer regular files; zip folders first."
@@ -160,7 +166,7 @@ final class MacFileTransfer: ObservableObject {
     }
     func remoteClipboardWritten() { pasteLock.withLock { if pasteID != nil { pasteCount = board.changeCount } } }
     func localClipboardChanged(notify: Bool = true) {
-        blocked = nil
+        blocked = nil; replayIntent = nil; replayPID = nil; prepared = [:]; saveWhenReady = [:]
         let old = sources.filter { $0.value.offer.mode == "clipboard" }; for id in old.keys { sources[id] = nil }
         pasteLock.withLock { pasteID = nil; pasteScheduled = false }
         offers = offers.filter { $0.value.mode != "clipboard" }; refreshIncoming()
@@ -188,10 +194,53 @@ final class MacFileTransfer: ObservableObject {
         }
     }
     private func refreshIncoming() { incoming = offers.values.sorted { $0.mode > $1.mode }.first.map { $0.summary + " · " + $0.files.prefix(3).map(\.name).joined(separator: ", ") } ?? "" }
-    func receive(to directory: URL? = nil) { if let offer = offers.values.sorted(by: { $0.mode > $1.mode }).first { receive(offer, paste: nil, directory: directory) } }
+    func receive(to directory: URL? = nil) {
+        guard let offer = offers.values.sorted(by: { $0.mode > $1.mode }).first,
+              let folder = directory ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
+        if let paths = prepared[offer.id] { savePrepared(offer, paths: paths, to: folder); return }
+        if busy { if grant?.offer.id == offer.id, grant?.paste != nil { saveWhenReady[offer.id] = folder; status = "Receiving files · will save to Downloads" }; return }
+        receive(offer, paste: nil, directory: folder)
+    }
+    private func consumed(_ id: String) {
+        guard prepared.removeValue(forKey: id) != nil else { return }
+        offers[id] = nil; refreshIncoming(); status = "Files handed to system paste"
+    }
+    private func writePrepared(_ urls: [URL], id: String) -> Bool {
+        fileProviders = urls.map { url in PreparedFileProvider(url: url) { [weak self] in self?.consumed(id) } }
+        let items = fileProviders.map { provider in
+            let item = NSPasteboardItem(); item.setString(marker, forType: Self.markerType)
+            item.setDataProvider(provider, forTypes: [.fileURL]); return item
+        }
+        board.clearContents(); let written = board.writeObjects(items); if written { onClipboardWritten?() }; return written
+    }
+    private func savePrepared(_ offer: FileOffer, paths: [URL], to folder: URL) {
+        guard !busy else { return }; busy = true; status = "Saving files to Downloads…"
+        let generation = self.generation
+        job = Task.detached(priority: .utility) { [weak self] in
+            let batch = folder.appendingPathComponent("Unictrl-" + UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: batch, withIntermediateDirectories: true)
+                for path in paths { try Task.checkCancellation(); try FileManager.default.copyItem(at: path, to: batch.appendingPathComponent(path.lastPathComponent)) }
+                try Task.checkCancellation()
+                await MainActor.run { [weak self] in
+                    guard let self, self.generation == generation else { return }
+                    self.busy = false; self.job = nil; self.offers[offer.id] = nil; self.prepared[offer.id] = nil; self.saveWhenReady[offer.id] = nil
+                    self.refreshIncoming(); self.status = "Saved to Downloads · " + batch.lastPathComponent; self.prepareClipboard()
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: batch)
+                await MainActor.run { [weak self] in guard let self, self.generation == generation else { return }; self.busy = false; self.job = nil; self.attention("Could not save files: " + error.localizedDescription) }
+            }
+        }
+    }
+    private func prepareClipboard() {
+        let id = pasteLock.withLock { pasteID }
+        guard ready, !busy, let id, let offer = offers[id], offer.mode == "clipboard", board.changeCount == pasteCount else { return }
+        receive(offer, paste: Paste(count: pasteCount, pid: nil, replay: false))
+    }
     func tryPaste() -> Bool {
         let state: (String?, Bool) = pasteLock.withLock {
-            guard let id = pasteID else { return (nil, false) }; if pasteScheduled || transferBusy { return (id, true) }
+            guard let id = pasteID else { return (nil, false) }; if pasteScheduled { return (id, true) }
             pasteScheduled = true; return (id, false)
         }
         guard let id = state.0 else { return false }; if state.1 { return true }
@@ -199,7 +248,9 @@ final class MacFileTransfer: ObservableObject {
             guard let self else { return }
             if id == "blocked", let reason = self.blocked { self.pasteLock.withLock { self.pasteScheduled = false }; self.attention(reason); return }
             guard let offer = self.offers[id], self.board.changeCount == self.pasteCount else { self.pasteLock.withLock { self.pasteScheduled = false }; return }
-            self.receive(offer, paste: Paste(count: self.board.changeCount, pid: NSWorkspace.shared.frontmostApplication?.processIdentifier))
+            self.replayIntent = id; self.replayPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            if self.busy { return }
+            self.receive(offer, paste: Paste(count: self.board.changeCount, pid: self.replayPID))
         }
         return true
     }
@@ -245,17 +296,21 @@ final class MacFileTransfer: ObservableObject {
                         self.status = grant.sender ? "Files sent" : grant.paste == nil ? "Files received in your chosen folder" : "Files ready to paste · temporary cache (1 hour)"
                         self.record(grant.offer, sent: grant.sender, result: "Completed")
                         if !received.isEmpty {
-                            self.receivedURLs = received; self.offers[grant.offer.id] = nil; self.refreshIncoming()
-                            if let paste = grant.paste, self.pasteLock.withLock({ self.pasteID == grant.offer.id }), self.board.changeCount == paste.count {
-                                self.board.clearContents()
-                                if self.board.writeObjects(received as [NSURL]) {
-                                    self.board.setString(self.marker, forType: Self.markerType)
-                                    self.onClipboardWritten?()
-                                    if self.canReplayPaste(), NSWorkspace.shared.frontmostApplication?.processIdentifier == paste.pid { Self.replayPaste() }
+                            self.receivedURLs = received
+                            if grant.paste != nil, self.pasteLock.withLock({ self.pasteID == grant.offer.id }) { self.prepared[grant.offer.id] = received }
+                            else { self.offers[grant.offer.id] = nil }
+                            self.refreshIncoming()
+                            if let paste = grant.paste, self.pasteLock.withLock({ self.pasteID == grant.offer.id }), self.board.changeCount == self.pasteCount {
+                                if self.writePrepared(received, id: grant.offer.id) {
+                                    let wantsReplay = paste.replay || self.replayIntent == grant.offer.id
+                                    let target = self.replayIntent == grant.offer.id ? self.replayPID : paste.pid
+                                    if wantsReplay, self.canReplayPaste(), NSWorkspace.shared.frontmostApplication?.processIdentifier == target { Self.replayPaste() }
                                 } else { self.status = "Files received; use Copy received files to paste" }
                             }
                             self.pasteLock.withLock { if self.pasteID == grant.offer.id { self.pasteID = nil }; self.pasteScheduled = false }
                         }
+                        if let paths = self.prepared[grant.offer.id], let folder = self.saveWhenReady.removeValue(forKey: grant.offer.id) { self.savePrepared(grant.offer, paths: paths, to: folder) }
+                        self.prepareClipboard()
                     }
                 } catch {
                     wire.close()
@@ -327,5 +382,18 @@ final class MacFileTransfer: ObservableObject {
         generation = UUID(); grant = nil; wire?.close(); wire = nil; job?.cancel(); job = nil; busy = false; progress = 0
         pasteLock.withLock { pasteScheduled = false }; status = "File transfer cancelled"
     }
-    private func reset() { blocked = nil; cancel(notify: false); offers = [:]; sources = [:]; incoming = ""; pasteLock.withLock { pasteID = nil; pasteScheduled = false } }
+    private func reset() { blocked = nil; cancel(notify: false); offers = [:]; sources = [:]; prepared = [:]; saveWhenReady = [:]; incoming = ""; pasteLock.withLock { pasteID = nil; pasteScheduled = false } }
+}
+
+/// Files already exist locally. Lazy URL delivery lets the panel retire the pending card when
+/// the native pasteboard consumer takes the files, without downloading or blocking in the callback.
+private final class PreparedFileProvider: NSObject, NSPasteboardItemDataProvider {
+    let url: URL
+    let read: () -> Void
+    init(url: URL, read: @escaping () -> Void) { self.url = url; self.read = read }
+    func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+        guard type == .fileURL else { return }
+        item.setString(url.absoluteString, forType: .fileURL)
+        DispatchQueue.main.async(execute: read)
+    }
 }

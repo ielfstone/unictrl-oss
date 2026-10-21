@@ -56,7 +56,7 @@ internal static class PanelSelfTest
             AssertFooter(root);
             panel.Update(new("Files offered · choose where to save", "2 files · 640 MiB · presentation.zip, video.mp4"));
             panel.Show(); await Task.Delay(250); root.UpdateLayout();
-            Check(Walk(root).OfType<Button>().Any(b => Equals(b.Content, "Receive & save…") && b.IsEnabled), "receive actionable");
+            Check(Walk(root).OfType<Button>().Any(b => Equals(b.Content, "Receive to Downloads") && b.IsEnabled), "receive actionable");
             AssertFooter(root); await Save(root, "panel-incoming.png");
             panel.Update(new("Receiving files · 42%", "2 files · 640 MiB · presentation.zip, video.mp4", true, .42));
             panel.Show(); await Task.Delay(250); root.UpdateLayout();

@@ -9,10 +9,10 @@ internal static class FileSelfTest
 {
     public static void Run()
     {
-        RunCase(true,false); RunCase(false,false); RunCase(false,true); RunCase(false,false,true); LateTicketAfterCancellation(); NativeFileClipboard(); RepeatedNativeIntents();
+        RunCase(true,false); RunCase(false,false); RunCase(false,true); RunCase(false,false,true); RunCase(false,false,false,1); RunCase(false,false,false,2); LateTicketAfterCancellation(); NativeFileClipboard(); RepeatedNativeIntents();
         Log.Write("files_test","passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list bounded_streaming");
     }
-    private static void RunCase(bool fromWindows,bool cancelTransfer,bool supersede=false)
+    private static void RunCase(bool fromWindows,bool cancelTransfer,bool supersede=false,int clipboardCase=0)
     {
         var root=Path.Combine(Path.GetTempPath(),"Unictrl file test "+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
@@ -25,7 +25,7 @@ internal static class FileSelfTest
             var settings=new Settings{Enabled=true,ClipboardEnabled=true,ClipboardFilesEnabled=true,FileRateMiB=100,
                 DeviceId=Guid.NewGuid().ToString("D"),MacAddress="127.0.0.1",Port=((IPEndPoint)listener.LocalEndpoint).Port,PairingKey="ci-files-not-a-real-key"};
             var ticket=Enumerable.Repeat((byte)7,16).ToArray();
-            var offer=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),supersede?"clipboard":"drop",[new("source.bin",small.Length)]);
+            var offer=new FileOffer(Guid.NewGuid().ToString("D").ToUpperInvariant(),supersede||clipboardCase>0?"clipboard":"drop",[new("source.bin",small.Length)]);
             string? failure=null;using var finished=new ManualResetEventSlim();using var chunkSent=new ManualResetEventSlim();
             using var desktop=new DesktopClipboard(_=>{},_=>{});
             using var nativeReady=new ManualResetEventSlim();desktop.SetActive(true,nativeReady.Set);Check(nativeReady.Wait(3000),"native pasteboard ready");
@@ -91,7 +91,7 @@ internal static class FileSelfTest
             });
             void filesControl(MessageType type,byte[] data)=>service!.Control(type,data);
             if(fromWindows)files.Offer([source,big]);
-            else{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);Thread.Sleep(50);Check(!chunkSent.IsSet,"offer must not start data transfer");if(supersede)Check(files.TryPaste(),"native paste starts download");else files.Receive();}
+            else{files.Control(MessageType.FileCommand,FileProtocol.Encode(new("offer",Offer:offer))[1..]);Thread.Sleep(50);if(supersede||clipboardCase>0){Check(chunkSent.Wait(8000),"clipboard offer prepares automatically");if(supersede)Check(files.TryPaste(),"early paste waits for preparation");}else{Check(!chunkSent.IsSet,"UI offer waits for acceptance");files.Receive(received);}}
             if(cancelTransfer)
             {
                 Check(chunkSent.Wait(8000),"partial chunk sent");Thread.Sleep(100);files.Cancel();
@@ -104,6 +104,32 @@ internal static class FileSelfTest
             {
                 Check(finished.Wait(90000),"file transport completed");Check(failure is null,failure??"file transport failed");Check(mock.Wait(8000),"peer completed");mock.GetAwaiter().GetResult();
                 if(!fromWindows){var path=Directory.GetFiles(received,"source.bin",SearchOption.AllDirectories).Single();Check(File.ReadAllBytes(path).SequenceEqual(small),"Mac to Windows received bytes");}
+                if(clipboardCase>0)
+                {
+                    Check(lastState?.Incoming.Contains("source.bin")==true,"prepared file retains pending card");
+                    using var clipboardReady=new ManualResetEventSlim();desktop.BeforeRemoteFileCommand(clipboardReady.Set);Check(clipboardReady.Wait(3000),"native paths published");
+                    Check(IsClipboardFormatAvailable(15),"native file paste format available without keyboard");
+                    if(clipboardCase==1)
+                    {
+                        Check(SpinWait.SpinUntil(()=>OpenClipboard(0),3000),"native paste consumer opens clipboard");
+                        try
+                        {
+                            var handle=GetClipboardData(15);Check(handle!=0,"native menu obtains file list");
+                            var path=new System.Text.StringBuilder(32768);DragQueryFileW(handle,0,path,(uint)path.Capacity);
+                            Check(File.ReadAllBytes(path.ToString()).SequenceEqual(small),"native menu receives complete file bytes");
+                        }
+                        finally{CloseClipboard();}
+                        Check(SpinWait.SpinUntil(()=>lastState?.Incoming=="",3000),"native paste retires pending card");
+                    }
+                    else
+                    {
+                        var downloads=Path.Combine(root,"Downloads");files.Receive(downloads);
+                        Check(SpinWait.SpinUntil(()=>lastState?.Status.StartsWith("Saved to Downloads")==true,5000),"receive saves cached file to Downloads");
+                        Check(File.ReadAllBytes(Directory.GetFiles(downloads,"source.bin",SearchOption.AllDirectories).Single()).SequenceEqual(small),"saved download matches original");
+                        Check(lastState?.Incoming=="","explicit receive retires pending card");
+                    }
+                    desktop.Write("clipboard case complete",()=>true);
+                }
                 if(supersede)
                 {
                     Check(GetClipboardSequenceNumber()==beforeClipboard,"older transfer did not overwrite clipboard");
@@ -182,6 +208,10 @@ internal static class FileSelfTest
     private static void Send(NetworkStream stream,SecureChannel cipher,FileCommand command)=>stream.Write(cipher.Seal(FileProtocol.Encode(command)));
     private static byte[] Read(NetworkStream stream,SecureChannel cipher)
     {var prefix=new byte[2];stream.ReadExactly(prefix);var length=BinaryPrimitives.ReadUInt16BigEndian(prefix);if(length is <17 or >SecureChannel.MaxFrame)throw new IOException("Bad frame");var bytes=new byte[length];stream.ReadExactly(bytes);return cipher.Open(bytes);}
+    [DllImport("user32.dll")]private static extern bool OpenClipboard(nint window);
+    [DllImport("user32.dll")]private static extern bool CloseClipboard();
+    [DllImport("user32.dll")]private static extern nint GetClipboardData(uint format);
+    [DllImport("shell32.dll",CharSet=CharSet.Unicode)]private static extern uint DragQueryFileW(nint handle,uint index,System.Text.StringBuilder name,uint length);
     [DllImport("user32.dll")]private static extern uint GetClipboardSequenceNumber();
     private static void Check(bool value,string name){if(!value)throw new Exception("File self-test: "+name);}
 }

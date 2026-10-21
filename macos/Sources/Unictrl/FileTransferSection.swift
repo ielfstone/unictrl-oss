@@ -42,7 +42,7 @@ struct FileTransferCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Incoming files", systemImage: "tray.and.arrow.down.fill").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.pine)
                         Text(service.incoming).font(.caption).lineLimit(3)
-                        Button("Receive & save…") { receive() }.disabled(service.busy).controlSize(.small)
+                        Button("Receive to Downloads") { service.receive() }.disabled(!service.canReceive).controlSize(.small)
                     }.padding(9).frame(maxWidth: .infinity, alignment: .leading).background(Color.pine.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
                 }
                 if service.busy { ProgressView(value: service.progress) }
@@ -58,11 +58,6 @@ struct FileTransferCard: View {
             }
         }
         .padding(10).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
-    }
-    private func receive() {
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
-        panel.prompt = "Receive here"; panel.message = "Choose where to save the incoming files. Unictrl keeps only transfer history."
-        panel.begin { if $0 == .OK, let folder = panel.url { service.receive(to: folder) } }
     }
     private func chooseFiles() {
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
@@ -93,7 +88,7 @@ struct FileTransferPreferences: View {
         Picker("File transfer limit", selection: $controller.fileRateMiB) {
             ForEach([1, 5, 10, 20, 50, 100], id: \.self) { Text("\($0) MiB/s").tag($0) }
         }
-        Text("Click the menu bar icon to send or receive files. Copy/paste: 100 MiB per batch. Panel: 1 GiB per file, 4 GiB per batch. Zip folders first. Use ⌘V / Ctrl+V to start downloading, or Receive & save in the panel.").font(.caption).foregroundStyle(.secondary)
+        Text("Click the menu bar icon to send or receive files. Copy/paste: 100 MiB per batch. Panel: 1 GiB per file, 4 GiB per batch. Zip folders first. Files within 100 MiB are prepared automatically for native paste. Receive saves them to Downloads.").font(.caption).foregroundStyle(.secondary)
         DisclosureGroup("Transfer history (\(service.history.count)/100)") {
             if service.history.isEmpty { Text("No transfers yet").foregroundStyle(.secondary) }
             ForEach(service.history) { record in

@@ -28,7 +28,7 @@ internal sealed class QuickPanel : Window
     private readonly Canvas screens = new() { Height = 94 };
     private readonly TextBlock connection = Text("Waiting for Mac", 11), status = Text("Files ready", 11), incoming = Text("", 11), notice = Text("", 11);
     private readonly ProgressBar progress = new() { Maximum = 100, Height = 3 };
-    private readonly Button receive = SmallButton("Receive & save…"), cancel = SmallButton("Cancel"), choose = SmallButton("Choose…");
+    private readonly Button receive = SmallButton("Receive to Downloads"), cancel = SmallButton("Cancel"), choose = SmallButton("Choose…");
     private readonly Button enableFiles = SmallButton("Enable file sharing"), reverse, smooth;
     private readonly Border inbox, drop, notification;
     private readonly ToggleSwitch enabled;
@@ -179,7 +179,7 @@ internal sealed class QuickPanel : Window
         notification.Visibility = state.Notice.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         inbox.Visibility = state.Incoming.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         progress.Visibility = cancel.Visibility = state.Busy ? Visibility.Visible : Visibility.Collapsed;
-        progress.Value = state.Progress * 100; receive.IsEnabled = !state.Busy; choose.IsEnabled = !state.Busy;
+        progress.Value = state.Progress * 100; receive.IsEnabled = !state.Busy || state.CanReceive; choose.IsEnabled = !state.Busy;
         if (shown) Fit();
     }
     public void ClosePanel() { closing = true; Close(); }
@@ -213,16 +213,10 @@ internal sealed class QuickPanel : Window
         catch (Exception error) { notice.Text = error.Message; notice.Visibility = Visibility.Visible; }
         finally { picking = false; Show(); }
     }
-    private async void Receive(object sender, RoutedEventArgs e)
+    private void Receive(object sender, RoutedEventArgs e)
     {
-        picking = true;
-        try
-        {
-            var picker = new Windows.Storage.Pickers.FolderPicker(); picker.FileTypeFilter.Add("*"); WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            var selected = await picker.PickSingleFolderAsync(); if (selected is not null) files.Receive(selected.Path);
-        }
+        try { files.Receive(); }
         catch (Exception error) { notice.Text = error.Message; notice.Visibility = Visibility.Visible; }
-        finally { picking = false; Show(); }
     }
     private void DragOver(object sender, DragEventArgs e)
     {
