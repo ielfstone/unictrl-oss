@@ -54,10 +54,12 @@ internal static class PanelSelfTest
             var tiles = panel.ScreenCanvas.Children.OfType<Border>().ToArray();
             Check(tiles.Length == 2 && Canvas.GetTop(tiles.Single(t => Equals(t.Tag, pc))) < Canvas.GetTop(tiles.Single(t => Equals(t.Tag, "mac"))), "Windows above Mac layout");
             AssertFooter(root);
-            panel.Update(new("Files offered · choose where to save", "2 files · 640 MiB · presentation.zip, video.mp4"));
+            panel.Update(new("Files offered · Receive saves to Downloads", "2 files · 640 MiB · presentation.zip, video.mp4"));
             panel.Show(); await Task.Delay(250); root.UpdateLayout();
             Check(Walk(root).OfType<Button>().Any(b => Equals(b.Content, "Receive to Downloads") && b.IsEnabled), "receive actionable");
             AssertFooter(root); await Save(root, "panel-incoming.png");
+            panel.Update(new("Ready for native paste · or save to Downloads", "2 files · 64 MiB · report.pdf, photo.png"));
+            panel.Show(); await Task.Delay(250); root.UpdateLayout(); AssertFooter(root); await Save(root, "panel-paste-ready.png");
             panel.Update(new("Receiving files · 42%", "2 files · 640 MiB · presentation.zip, video.mp4", true, .42));
             panel.Show(); await Task.Delay(250); root.UpdateLayout();
             Check(Walk(root).OfType<ProgressBar>().Any(p => p.Value == 42), "progress state");
@@ -76,7 +78,9 @@ internal static class PanelSelfTest
             panel.Show(); await Task.Delay(200);
             Check(GetForegroundWindow() == WinRT.Interop.WindowNative.GetWindowHandle(panel), "panel takes foreground");
             outside.Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(outside)); await Task.Delay(200);
-            Check(!panel.AppWindow.IsVisible, "outside activation dismisses panel"); outside.Close();
+            Check(!panel.AppWindow.IsVisible, "outside activation dismisses panel");
+            panel.Toggle(); Check(!panel.AppWindow.IsVisible, "tray click does not reopen just-dismissed panel");
+            await Task.Delay(350); panel.Toggle(); Check(panel.AppWindow.IsVisible, "later tray click reopens panel"); outside.Close();
             Log.Write("panel_test", "passed screens_above_below latency controls receive progress cancel small_screen footer 150percent_render outside_dismiss"); Finish(null);
         }
         catch (Exception error) { Finish(error); }

@@ -54,7 +54,7 @@ internal sealed class WindowsFileTransfer : IDisposable
         {
             if(busy)return; history.CleanCache(all);
             var intent=Volatile.Read(ref clipboardIntent);desktop.ClearRemoteFiles(()=>Volatile.Read(ref clipboardIntent)==intent,expiredOnly:true);
-            if(received.Any(p=>!File.Exists(p))) { received=[]; Report("Temporary clipboard files expired; copy again or use the transfer panel"); }
+            if(received.Any(p=>!File.Exists(p))) { foreach(var id in prepared.Where(p=>p.Value.Any(path=>!File.Exists(path))).Select(p=>p.Key).ToArray()){prepared.Remove(id);offers.Remove(id);} received=[]; Report("Temporary clipboard files expired; copy again or use the transfer panel"); }
         }
     }
     private bool Ready => settings.Enabled && settings.ClipboardEnabled && settings.ClipboardFilesEnabled && remoteEnabled && send is not null;
@@ -93,7 +93,7 @@ internal sealed class WindowsFileTransfer : IDisposable
                     offers[offer.Id]=offer;
                     if(offer.Mode=="clipboard")
                     {
-                        blocked=null; var intent=Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteScheduled=false;pasteWanted=false;pasteWindow=0;pasteSequence=0;prepared.Clear();saveWhenReady.Clear();
+                        blocked=null; var intent=Interlocked.Increment(ref clipboardIntent);pasteId=offer.Id;pasteScheduled=false;pasteWanted=false;pasteWindow=0;pasteSequence=0;prepared.Clear();
                         desktop.Write(new ClipboardContent(FileIntent:offer.Id),()=>Volatile.Read(ref clipboardIntent)==intent,
                             ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==intent){pasteSequence=GetClipboardSequenceNumber();PrepareClipboard();}}});
                     }
@@ -134,7 +134,7 @@ internal sealed class WindowsFileTransfer : IDisposable
     {
         lock(gate)
         {
-            blocked=null;prepared.Clear();saveWhenReady.Clear();Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
+            blocked=null;prepared.Clear();Interlocked.Increment(ref clipboardIntent);var old=sources.Where(p=>p.Value.Offer.Mode=="clipboard").Select(p=>p.Key).ToArray();
             foreach(var id in old)sources.Remove(id);pasteId=null;pasteScheduled=false;pasteWanted=false;pasteWindow=0;
             foreach(var id in offers.Where(p=>p.Value.Mode=="clipboard").Select(p=>p.Key).ToArray())offers.Remove(id);
             if(notify&&Ready)Send(new("clear"));
@@ -284,7 +284,7 @@ internal sealed class WindowsFileTransfer : IDisposable
                 }
                 history.Add(offer,source is not null,"Completed");
                 Report(source is null?(paste is null?"Files received in your chosen folder":"Files ready to paste · temporary cache (1 hour)"):"Files sent",1);
-                if(prepared.TryGetValue(offer.Id,out var saved) && saveWhenReady.Remove(offer.Id,out var folder))SavePrepared(offer,saved,folder);
+                if(paths.Length>0 && saveWhenReady.Remove(offer.Id,out var folder))SavePrepared(offer,paths,folder);
                 PrepareClipboard();
             }
         }
@@ -348,7 +348,7 @@ internal sealed class WindowsFileTransfer : IDisposable
     public void ShowReceived(){lock(gate){if(received.Length>0)Process.Start(new ProcessStartInfo("explorer.exe", "/select,\""+received[0]+"\""){UseShellExecute=true});}}
     public void Cancel(bool notify=true)
     {
-        lock(gate){if(busy && activeId is {} cancelled && (sources.GetValueOrDefault(cancelled)?.Offer ?? offers.GetValueOrDefault(cancelled)) is {} cancelledOffer)history.Add(cancelledOffer,sources.ContainsKey(cancelled),"Cancelled");if(notify&&activeId is {} id){if(sources.Remove(id))Send(new("withdraw",Id:id));Send(new("cancel",Id:id));}ResetTransfer();Report("File transfer cancelled");}
+        lock(gate){if(busy && activeId is {} cancelled && (sources.GetValueOrDefault(cancelled)?.Offer ?? offers.GetValueOrDefault(cancelled)) is {} cancelledOffer)history.Add(cancelledOffer,sources.ContainsKey(cancelled),"Cancelled");if(activeId is {} saving)saveWhenReady.Remove(saving);if(notify&&activeId is {} id){if(sources.Remove(id))Send(new("withdraw",Id:id));Send(new("cancel",Id:id));}ResetTransfer();Report("File transfer cancelled");}
     }
     private void ResetTransfer(){connectionGeneration++;Interlocked.Increment(ref clipboardIntent);pendingRequest=null;activeId=null;transfer?.Cancel();transfer?.Dispose();transfer=null;busy=false;pendingPaste=null;pasteScheduled=false;}
     private void Reset(){blocked=null;ResetTransfer();sources.Clear();offers.Clear();prepared.Clear();saveWhenReady.Clear();pasteId=null;pasteScheduled=false;pasteWanted=false;pasteWindow=0;}

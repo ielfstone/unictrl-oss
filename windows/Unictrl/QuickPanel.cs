@@ -34,6 +34,7 @@ internal sealed class QuickPanel : Window
     private readonly ToggleSwitch enabled;
     private QuickPanelPeer peer = new("Waiting for Mac", false);
     private bool picking, closing, shown;
+    private long lastDeactivated = -1000;
     internal double? PreviewMaxHeight { get; set; }
     internal ScrollViewer MiddleScroll => scroll;
     internal Canvas ScreenCanvas => screens;
@@ -92,7 +93,7 @@ internal sealed class QuickPanel : Window
         menu.Children.Add(MenuRow("Settings & history…", "\uE713", OpenSettings)); menu.Children.Add(MenuRow("Quit Unictrl", "\uE7E8", actions.Quit));
         Grid.SetRow(menu, 2); root.Children.Add(menu);
         Content = new Border { CornerRadius = new(12), BorderThickness = new(1), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 128, 128, 128)), Background = (Brush)Application.Current.Resources["ApplicationPageBackgroundThemeBrush"], Child = root };
-        Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !picking) AppWindow.Hide(); };
+        Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !picking) { lastDeactivated = Environment.TickCount64; AppWindow.Hide(); } };
         AppWindow.Closing += (_, e) => { if (!closing) { e.Cancel = true; AppWindow.Hide(); } };
         root.ActualThemeChanged += (_, _) => {
             if (Content is Border surface) surface.Background = new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 248, 248, 248));
@@ -183,7 +184,13 @@ internal sealed class QuickPanel : Window
         if (shown) Fit();
     }
     public void ClosePanel() { closing = true; Close(); }
-    public void Toggle() { if (AppWindow.IsVisible) AppWindow.Hide(); else Show(); }
+    public void Toggle()
+    {
+        if (AppWindow.IsVisible) AppWindow.Hide();
+        // A click on the tray first deactivates this window, then delivers the icon callback.
+        // Treat both events as one dismissal instead of reopening the panel immediately.
+        else if (Environment.TickCount64 - lastDeactivated > 300) Show();
+    }
     public void Show() { shown = true; Fit(); AppWindow.Show(); Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)); }
     private void Fit()
     {

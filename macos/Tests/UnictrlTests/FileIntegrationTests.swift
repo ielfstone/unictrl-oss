@@ -111,6 +111,9 @@ import Testing
         #expect(board.types?.contains(.fileURL) == true)
         #expect(board.string(forType: .string) == nil)
         #expect(service.incoming.contains("received.bin")) // Cached is not yet accepted or pasted.
+        #expect(board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(service.incoming.contains("received.bin")) // Native type/menu queries must not consume it.
         #expect((board.readObjects(forClasses: [NSURL.self]) as? [URL])?.first == service.receivedURLs.first)
         for _ in 0..<50 { if service.incoming.isEmpty { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(service.incoming.isEmpty) // Native paste consumption retires the pending card.

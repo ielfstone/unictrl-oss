@@ -102,7 +102,7 @@ final class MacFileTransfer: ObservableObject {
         guard !busy else { return }
         historyStore.cleanCache(all: all)
         let expired = receivedURLs.contains(where: { !FileManager.default.fileExists(atPath: $0.path) })
-        if expired { receivedURLs = []; prepared = [:] }
+        if expired { receivedURLs = []; for (id, paths) in prepared where paths.contains(where: { !FileManager.default.fileExists(atPath: $0.path) }) { prepared[id] = nil; offers[id] = nil }; refreshIncoming() }
         if isRemoteFileClipboard, expired {
             writeIntent(); attention("Temporary clipboard files expired. Copy the files again, or use the transfer panel.")
         }
@@ -140,7 +140,7 @@ final class MacFileTransfer: ObservableObject {
             guard let offer = command.offer, (try? FileProtocol.validate(offer)) != nil else { return }
             offers = offers.filter { $0.value.mode != offer.mode }; offers[offer.id] = offer
             if offer.mode == "clipboard" {
-                blocked = nil; prepared = [:]; saveWhenReady = [:]; writeIntent()
+                blocked = nil; prepared = [:]; writeIntent()
                 pasteLock.withLock { pasteID = offer.id; pasteCount = board.changeCount; pasteScheduled = false }; replayIntent = nil; replayPID = nil
                 prepareClipboard()
             }
@@ -166,7 +166,7 @@ final class MacFileTransfer: ObservableObject {
     }
     func remoteClipboardWritten() { pasteLock.withLock { if pasteID != nil { pasteCount = board.changeCount } } }
     func localClipboardChanged(notify: Bool = true) {
-        blocked = nil; replayIntent = nil; replayPID = nil; prepared = [:]; saveWhenReady = [:]
+        blocked = nil; replayIntent = nil; replayPID = nil; prepared = [:]
         let old = sources.filter { $0.value.offer.mode == "clipboard" }; for id in old.keys { sources[id] = nil }
         pasteLock.withLock { pasteID = nil; pasteScheduled = false }
         offers = offers.filter { $0.value.mode != "clipboard" }; refreshIncoming()
@@ -309,7 +309,7 @@ final class MacFileTransfer: ObservableObject {
                             }
                             self.pasteLock.withLock { if self.pasteID == grant.offer.id { self.pasteID = nil }; self.pasteScheduled = false }
                         }
-                        if let paths = self.prepared[grant.offer.id], let folder = self.saveWhenReady.removeValue(forKey: grant.offer.id) { self.savePrepared(grant.offer, paths: paths, to: folder) }
+                        if !received.isEmpty, let folder = self.saveWhenReady.removeValue(forKey: grant.offer.id) { self.savePrepared(grant.offer, paths: received, to: folder) }
                         self.prepareClipboard()
                     }
                 } catch {
@@ -379,6 +379,7 @@ final class MacFileTransfer: ObservableObject {
             if grant?.sender == true { sources[id] = nil; send(FileCommand(kind: "withdraw", id: id)) }
             send(FileCommand(kind: "cancel", id: id))
         }
+        if let id = grant?.offer.id { saveWhenReady[id] = nil }
         generation = UUID(); grant = nil; wire?.close(); wire = nil; job?.cancel(); job = nil; busy = false; progress = 0
         pasteLock.withLock { pasteScheduled = false }; status = "File transfer cancelled"
     }
