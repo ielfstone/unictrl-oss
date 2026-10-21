@@ -38,6 +38,15 @@ internal sealed class Receiver : IDisposable
     public event Action<QualityInfo?>? QualityChanged;
     /// The Mac's latest report, with the last checklist it sent.
     public QualityInfo? Quality { get; private set; }
+    public ScrollPreferences? Preferences { get; private set; }
+    public bool IsInUse => injector.Active;
+    public event Action? PanelChanged;
+    public void SetScrollPreferences(ScrollPreferences value)
+    {
+        if (Preferences is null) return;
+        try { send?.Invoke(value.Message((byte)MessageType.PanelPreferencesEdit)); }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
+    }
 
     /// Asks the Mac to rename a screen; it answers with the arrangement carrying the new name.
     public void Rename(string id, string name)
@@ -110,7 +119,8 @@ internal sealed class Receiver : IDisposable
                     Quality = null;
                     QualityChanged?.Invoke(null);
                 }
-                injector.Leave("disconnected");
+                Preferences = null;
+                injector.Leave("disconnected"); PanelChanged?.Invoke();
                 client?.Dispose();
                 client = null;
             }
@@ -227,6 +237,9 @@ internal sealed class Receiver : IDisposable
             case MessageType.ClipboardCapabilities or MessageType.ClipboardImageCapabilities or MessageType.ClipboardTicket or MessageType.FileCapabilities or MessageType.FileCommand:
                 clipboard?.Control(this, reader.Type, reader.Rest());
                 break;
+            case MessageType.PanelPreferences:
+                if (ScrollPreferences.Parse(reader.Rest()) is { } preferences) { Preferences = preferences; PanelChanged?.Invoke(); }
+                break;
             case MessageType.Enter when reader.Has(4):
                 var entryMm = reader.F32();
                 var edge = reader.Has(1) ? (ScreenEdge)reader.U8() : ScreenEdge.Left;
@@ -234,6 +247,7 @@ internal sealed class Receiver : IDisposable
                 var flags = reader.Has(1) ? reader.U8() : 0;
                 if ((flags & 1) != 0) injector.Resume(edge, flags);
                 else injector.Enter(entryMm, edge, flags);
+                PanelChanged?.Invoke();
                 break;
             case MessageType.Move or MessageType.MoveRaw when reader.Has(8):
             {
@@ -250,7 +264,7 @@ internal sealed class Receiver : IDisposable
                     lastSpikeLog = DateTime.UtcNow;
                     Log.Diagnostic("delay_spike", $"late_ms={lateMs:F1} waited_ms={(arrivalUs - lastDoneUs) / 1000.0:F1} prev_process_ms={lastProcessMs:F1}");
                 }
-                if (exit is { } e) send(Messages.Leave(e));
+                if (exit is { } e) { send(Messages.Leave(e)); PanelChanged?.Invoke(); }
                 break;
             }
             case MessageType.Quality:

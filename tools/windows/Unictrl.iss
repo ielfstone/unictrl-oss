@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.7.1"
+  #define AppVersion "0.7.2"
 #endif
 [Setup]
 AppId={{91F76CD4-F102-4F50-95BA-5D6682CC32AF}
@@ -16,7 +16,8 @@ UninstallDisplayIcon={app}\Unictrl.exe
 OutputDir={#OutputDir}
 OutputBaseFilename=Unictrl-{#AppVersion}-windows-x64-Setup
 SetupIconFile={#PayloadDir}\Assets\Unictrl.ico
-Compression=lzma2/fast
+Compression=lzma2/ultra64
+LZMAUseSeparateProcess=yes
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

@@ -9,6 +9,7 @@
     <RootNamespace>Unictrl.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Unictrl\ScrollPreferences.cs" Link="Linked\ScrollPreferences.cs" />
     <Compile Include="..\Unictrl\TransferHistory.cs" Link="Linked\TransferHistory.cs" />
     <Compile Include="..\Unictrl\Settings.cs" Link="Linked\Settings.cs" />
     <Compile Include="..\Unictrl\FileProtocol.cs" Link="Linked\FileProtocol.cs" />

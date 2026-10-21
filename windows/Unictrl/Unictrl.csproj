@@ -14,9 +14,10 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
+    <SatelliteResourceLanguages>en;en-US;zh-Hans;zh-Hant;zh-CN;zh-TW;zh-HK</SatelliteResourceLanguages>
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <Version>0.7.1</Version>
+    <Version>0.7.2</Version>
     <Company>Enliva LLC</Company>
     <Product>Unictrl</Product>
     <Copyright>© 2026 Enliva LLC</Copyright>

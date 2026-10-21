@@ -30,10 +30,10 @@ import ServiceManagement
         }
     }
     @Published var reverseMouseWheel: Bool {
-        didSet { settings.reverseMouseWheel = reverseMouseWheel; applySettings() }
+        didSet { settings.reverseMouseWheel = reverseMouseWheel; applySettings(); sendPanelPreferences() }
     }
     @Published var smoothScrolling: Bool {
-        didSet { settings.smoothScrolling = smoothScrolling; applySettings() }
+        didSet { settings.smoothScrolling = smoothScrolling; applySettings(); sendPanelPreferences() }
     }
     /// "native": each PC's own pointer speed; "physical": the Mac's, converted by millimetres.
     @Published var pointerMode: String {
@@ -369,6 +369,11 @@ import ServiceManagement
         Log.write("diagnostics", on ? "on" : "off")
     }
 
+    private func sendPanelPreferences(to peer: String? = nil) {
+        var message = MessageWriter(.panelPreferences)
+        message.u8(1); message.u8(reverseMouseWheel ? 1 : 0); message.u8(smoothScrolling ? 1 : 0)
+        for id in peer.map({ [$0] }) ?? server.connectedPeers { server.send(message, to: id) }
+    }
     private func applySettings() {
         settings.save()
         capture.update(settings: settings)
@@ -404,7 +409,7 @@ import ServiceManagement
         }
 
         server.onConnected = { [unowned self] id, name in
-            clipboard.connected(id); files.connected(id)
+            clipboard.connected(id); files.connected(id); sendPanelPreferences(to: id)
             lastPong[id] = Date()
             quality.connected(id)
             if let i = settings.peers.firstIndex(where: { $0.id == id }), settings.peers[i].name != name {
@@ -953,6 +958,12 @@ import ServiceManagement
     private func handle(_ data: Data, from id: String) {
         var reader = MessageReader(data)
         switch reader.type {
+        case .panelPreferencesEdit:
+            guard data.count == 4, reader.u8() == 1, let reverse = reader.u8(), reverse <= 1,
+                  let smooth = reader.u8(), smooth <= 1 else { break }
+            if reverseMouseWheel != (reverse == 1) { reverseMouseWheel = reverse == 1 }
+            if smoothScrolling != (smooth == 1) { smoothScrolling = smooth == 1 }
+            sendPanelPreferences(to: id)
         case .fileCapabilities, .fileCommand:
             files.control(data, from: id)
         case .clipboardCapabilities, .clipboardImageCapabilities:

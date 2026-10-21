@@ -149,9 +149,14 @@ public sealed partial class MainWindow : Window
     private void EnsureQuickPanel()
     {
         if (quickPanel is not null) return;
-        quickPanel = new QuickPanel(settings, clipboard.Files, ShowWindow, value => EnabledSwitch.IsOn = value, () => { ClipboardSwitch.IsOn = true; ClipboardFilesSwitch.IsOn = true; }, Quit);
-        quickPanel.Update(lastFileState); quickPanel.UpdateConnection(StatusText.Text);
+        quickPanel = new QuickPanel(settings, clipboard.Files, new QuickPanelActions(
+            ShowWindow, value => EnabledSwitch.IsOn = value,
+            () => { ClipboardSwitch.IsOn = true; ClipboardFilesSwitch.IsOn = true; },
+            () => { ShowWindow(); OnPairAgain(this, new RoutedEventArgs()); },
+            value => receiver?.SetScrollPreferences(value), CommitLayout, Quit));
+        quickPanel.Update(lastFileState); RefreshQuickPanel();
     }
+    private void RefreshQuickPanel() => quickPanel?.UpdatePeer(new(StatusText.Text, connected, arrangement, receiver?.Quality, receiver?.IsInUse ?? false, receiver?.Preferences));
     private void OnOpenTransferPanel(object sender, RoutedEventArgs e) { EnsureQuickPanel(); quickPanel!.Show(); }
     private void OnClearHistory(object sender, RoutedEventArgs e) => clipboard.Files.ClearHistory();
     private void OnClearFileCache(object sender, RoutedEventArgs e) => clipboard.Files.CleanCache(true);
@@ -238,8 +243,9 @@ public sealed partial class MainWindow : Window
         tray.SetTooltip($"Unictrl · {text}");
         DispatcherQueue.TryEnqueue(() =>
         {
-            StatusText.Text = text; quickPanel?.UpdateConnection(text);
+            StatusText.Text = text;
             connected = text.StartsWith("Connected", StringComparison.Ordinal);
+            RefreshQuickPanel();
             UpdateDetail();
         });
     }
@@ -296,16 +302,17 @@ public sealed partial class MainWindow : Window
         }
         var next = new Receiver(settings, SetStatus, clipboard);
         next.MacChanged += () => DispatcherQueue.TryEnqueue(UpdateDetail);
+        next.PanelChanged += () => DispatcherQueue.TryEnqueue(() => { if (receiver == next) RefreshQuickPanel(); });
         next.ArrangementChanged += info => DispatcherQueue.TryEnqueue(() =>
         {
             if (receiver != next) return;
             arrangement = info;
             RenderScreens();
-            ShowNames();
+            ShowNames(); RefreshQuickPanel();
         });
         next.QualityChanged += info => DispatcherQueue.TryEnqueue(() =>
         {
-            if (receiver == next) ShowQuality(info);
+            if (receiver == next) { ShowQuality(info); RefreshQuickPanel(); }
         });
         if (onConnected is not null) next.Connected += onConnected;
         receiver = next;
@@ -790,7 +797,7 @@ public sealed partial class MainWindow : Window
     private void CommitLayout(ArrangementInfo next)
     {
         arrangement = next;
-        RenderScreens();
+        RenderScreens(); RefreshQuickPanel();
         var offsets = next.Screens.Where(s => !s.IsMac).ToDictionary(s => s.Id, s => s.YMm ?? s.OffsetMm);
         var positions = next.Screens.Where(s => !s.IsMac).ToDictionary(s => s.Id, s => new ScreenPosition(s.XMm ?? 0, s.YMm ?? s.OffsetMm));
         receiver?.EditArrangement(next.Screens.Select(s => s.Id), offsets, positions);

@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'artifacts' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $stage = Join-Path $out ('windows-stage-' + [guid]::NewGuid().ToString('N'))
-$packageName = 'Unictrl-0.7.1-windows-x64-portable'
+$packageName = 'Unictrl-0.7.2-windows-x64-portable'
 $payload = Join-Path $stage $packageName
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 $project = Join-Path $repo 'windows/Unictrl/Unictrl.csproj'
@@ -48,6 +48,8 @@ if ($runtimeConfig.runtimeOptions.PSObject.Properties.Name -contains 'framework'
 Set-Content -LiteralPath (Join-Path $payload 'Unictrl.portable') -Value 'Portable mode v1' -Encoding utf8
 Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $payload 'LICENSE.txt')
 Copy-Item (Join-Path $PSScriptRoot 'portable-README.zh-Hans.txt') (Join-Path $payload '使用说明.txt')
+# Prune only resource-only language folders; all runtime code and shared PRI files remain.
+& (Join-Path $PSScriptRoot 'trim-language-resources.ps1') -Payload $payload -Report (Join-Path $out 'language-pruning.json')
 # The diagnostic exits before creating a window, input receiver or autostart entry.
 $process = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--discover-test' -WorkingDirectory $payload -PassThru
 if (-not $process.WaitForExit(30000)) {
@@ -71,7 +73,7 @@ Write-Host "FILE_TRANSFER_TEST=passed encrypted_bidirectional_1GiB acceptance ca
 $panelProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--panel-test' -WorkingDirectory $payload -PassThru
 if (-not $panelProcess.WaitForExit(30000)) { $panelProcess.Kill(); Get-Content $log; throw 'Tray panel native test timed out.' }
 if ($panelProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'panel_test passed' -Quiet)) { Get-Content $log; throw 'Tray panel native test failed.' }
-Copy-Item (Join-Path $payload 'Data/panel-test.png') (Join-Path $out 'windows-tests/panel-test.png')
+Get-ChildItem (Join-Path $payload 'Data') -Filter 'panel-*.png' | Copy-Item -Destination (Join-Path $out 'windows-tests')
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'
@@ -92,20 +94,26 @@ foreach ($dir in $sourceRoots) {
 foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
     if ($file.Extension -eq '.md' -or $file.Name -eq 'LICENSE') { Copy-Item $file.FullName $sourceStage }
 }
-Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $payload 'Source.zip')
+Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $out 'Unictrl-0.7.2-Source.zip')
+'Source for this build: https://github.com/ielfstone/unictrl-oss/tree/' + $env:GITHUB_SHA | Set-Content (Join-Path $payload 'SOURCE.txt') -Encoding utf8
 $buildInfo = [ordered]@{
-    version = '0.7.1'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.7.2'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
     layoutVersion = 2; feature = 'text and PNG clipboard with signed automatic updates'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $buildInfo | ConvertTo-Json | Set-Content (Join-Path $payload 'BUILD-INFO.json') -Encoding utf8
 $zip = Join-Path $out ($packageName + '.zip')
 if (Test-Path $zip) { throw "Output already exists: $zip. Use another output directory to keep the previous package." }
-Compress-Archive -LiteralPath $payload -DestinationPath $zip
+$sevenZip=Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+if(Test-Path $sevenZip){
+    Push-Location $stage
+    try { & $sevenZip a -tzip '-mm=Deflate' '-mx=9' $zip $packageName | Out-Host; if($LASTEXITCODE -ne 0){throw 'ZIP compression failed.'} }
+    finally { Pop-Location }
+}else{Compress-Archive -LiteralPath $payload -DestinationPath $zip}
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
-    foreach ($required in @('Unictrl.exe','Unictrl.portable','Microsoft.UI.Xaml.dll','coreclr.dll','vcruntime140.dll','Source.zip')) {
+    foreach ($required in @('Unictrl.exe','Unictrl.portable','Microsoft.UI.Xaml.dll','coreclr.dll','vcruntime140.dll','SOURCE.txt')) {
         if (-not ($archive.Entries.FullName -contains "$packageName/$required")) { throw "ZIP is missing $required" }
     }
 } finally { $archive.Dispose() }
@@ -114,3 +122,5 @@ $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant
 Write-Host "Portable ZIP ready: $zip"
 Write-Host "UPDATE_ASSET_SHA256=$hash"
 Write-Host "UPDATE_ASSET_SIZE=$((Get-Item -LiteralPath $zip).Length)"
+
+& (Join-Path $PSScriptRoot 'measure-package.ps1') -Zip $zip -Output (Join-Path $out 'optimized-size.json')

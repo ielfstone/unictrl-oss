@@ -1,0 +1,52 @@
+name: Windows panel preview and package size audit
+on:
+  push:
+    branches: [feature/windows-panel-preview]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Measure previous package on the Windows VM
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force artifacts/baseline | Out-Null
+          gh release download v0.7.1 --repo ielfstone/unictrl-oss --pattern '*windows-x64-portable.zip' --dir artifacts/baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot retrieve baseline package' }
+          ./tools/windows/measure-package.ps1 -Zip artifacts/baseline/Unictrl-0.7.1-windows-x64-portable.zip -Output artifacts/baseline-size.json
+      - name: Build, render native WinUI panel and measure optimized installer
+        shell: pwsh
+        run: |
+          ./tools/windows/build-portable.ps1
+          ./tools/windows/build-installer.ps1
+          $old = 84053040
+          $new = (Get-Item artifacts/Unictrl-0.7.2-windows-x64-Setup.exe).Length
+          [ordered]@{baselineInstallerBytes=$old;optimizedInstallerBytes=$new;savedBytes=$old-$new;savedPercent=[Math]::Round((1-$new/$old)*100,2)} | ConvertTo-Json | Set-Content artifacts/installer-size.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: panel-preview-and-size-report
+          path: |
+            artifacts/windows-tests/**
+            artifacts/*size.json
+            artifacts/language-pruning.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-build-packages
+          path: |
+            artifacts/Unictrl-0.7.2-windows-x64-Setup.exe
+            artifacts/Unictrl-0.7.2-windows-x64-portable.zip
+            artifacts/Unictrl-0.7.2-Source.zip
+          if-no-files-found: error

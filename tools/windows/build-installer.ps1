@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OutputDirectory = '', [string]$Version = '0.7.1')
+param([string]$OutputDirectory = '', [string]$Version = '0.7.2')
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if(-not $OutputDirectory){$OutputDirectory=Join-Path $repo 'artifacts'}
