@@ -1,0 +1,95 @@
+name: Prepare verified v0.7.3 distribution branch
+
+on:
+  push:
+    branches: [fix/tray-native-frame]
+    paths:
+      - .github/workflows/release-0.7.3-dispatch.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ielfstone/unictrl-oss
+      WINDOWS_RUN: '39543781790'
+      MAC_ZIP_BLOB: b05a97ad425d40cc71d62641ad854dd3f8370aab
+      MAC_DMG_BLOB: 8f3c9f5feb3b5799cda843592537206a1537a526
+      PUBLIC_KEY: MIIBigKCAYEA0ZI9WH2fvSbKi7pdq0XLYS7eztsiXcLa7TnshlhkANyfAE3MtHBk9Ryvnx1eckzZqCtrlVYH64M3sMQvXwme+f7I3NSvdEBs2aukSp+k5QzU8VDj5iIu8t+juop3X9zLtlQm8QykHpyYytnhk5WsvsX+UZ4zAaLBAey/2g1gpYeHR3dFQG2YNbXvQTMEFrm7ou3THnoUhPYG13wYC0T1YZs9EYluo+YVoBoQh6Oyn41MVeP53SZxIR54WVvahxt02byFtY/P506fRvH8gBD5e0w+OhinxulZJ9uMXiHxSOdpsYq5Xs1CjOEAAahNEwpwXMXkez/0uSxuBQx/fvMg2+dmr4rbp2EG+h6g6P3kmLv9JU6BQgI0s5kFEQKV/s4T23SMnbBytuH+qehotAdeptNA8aL1m2qhc1LC/SRCmj/lX/hyr3sShGH7kzyEZW3aKwUVlSyVaTh+m0AbRiZNGMt2i/mGqkrBVz+gwK5UDFLe/tjCHtRH91Y9+6GWQZNpAgMBAAE=
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Assemble distribution commit from verified blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_json=$(gh api "repos/$REPO/actions/runs/$WINDOWS_RUN")
+          source_sha=$(jq -r '.head_sha' <<<"$run_json")
+          conclusion=$(jq -r '.conclusion' <<<"$run_json")
+          [[ "$conclusion" == success ]]
+          [[ ! "$source_sha" =~ ^\{ ]]
+
+          current_sha=$(git rev-parse HEAD)
+          current_tree=$(git rev-parse HEAD^{tree})
+
+          test "$(gh api "repos/$REPO/git/blobs/$MAC_ZIP_BLOB" --jq .sha)" = "$MAC_ZIP_BLOB"
+          test "$(gh api "repos/$REPO/git/blobs/$MAC_DMG_BLOB" --jq .sha)" = "$MAC_DMG_BLOB"
+
+          jq -n \
+            --arg version 0.7.3 \
+            --arg source_sha "$source_sha" \
+            --arg key "$PUBLIC_KEY" \
+            '{version:$version,sourceCommit:$source_sha,windowsRun:39543781790,publicKey:$key,sourceArchive:{name:"Unictrl-0.7.3-Source.zip",size:3779419,sha256:"0f2e8e853c755c4eac3ebba3a8e1b1e8dd4237f5743a1595be1e4e68d0bad56a"}}' > /tmp/release.json
+
+          release_blob=$(gh api --method POST "repos/$REPO/git/blobs" \
+            -f encoding=base64 -f content="$(base64 -w0 /tmp/release.json)" --jq .sha)
+
+          tree_payload=$(jq -nc \
+            --arg base "$current_tree" \
+            --arg release "$release_blob" \
+            --arg zip "$MAC_ZIP_BLOB" \
+            --arg dmg "$MAC_DMG_BLOB" \
+            '{base_tree:$base,tree:[
+              {path:"distribution/release.json",mode:"100644",type:"blob",sha:$release},
+              {path:"distribution/Unictrl-0.7.3-macOS-universal-update.zip",mode:"100644",type:"blob",sha:$zip},
+              {path:"distribution/Unictrl-0.7.3-macOS-universal.dmg",mode:"100644",type:"blob",sha:$dmg}
+            ]}')
+
+          distribution_tree=$(jq -n \
+            --arg tree "$current_tree" \
+            --arg message "Assemble verified Unictrl 0.7.3 release assets" \
+            --arg parent "$current_sha" \
+            '{tree:$tree,message:$message,parents:[$parent]}' >/dev/null; \
+            gh api --method POST "repos/$REPO/git/trees" --input - <<<"$tree_payload" --jq .sha)
+
+          commit_payload=$(jq -nc \
+            --arg tree "$distribution_tree" \
+            --arg message "Assemble verified Unictrl 0.7.3 release assets" \
+            --arg parent "$current_sha" \
+            '{tree:$tree,message:$message,parents:[$parent]}')
+          distribution_commit=$(gh api --method POST "repos/$REPO/git/commits" \
+            --input - --jq .sha <<<"$commit_payload")
+
+          if gh api "repos/$REPO/git/ref/heads/distribution/v0.7.3" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$REPO/git/refs/heads/distribution/v0.7.3" \
+              -f sha="$distribution_commit" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$REPO/git/refs" \
+              -f ref=refs/heads/distribution/v0.7.3 -f sha="$distribution_commit" >/dev/null
+          fi
+
+          echo "Source commit: $source_sha"
+          echo "Distribution commit: $distribution_commit"
+          echo "Mac zip blob: $MAC_ZIP_BLOB"
+          echo "Mac DMG blob: $MAC_DMG_BLOB"
+          gh workflow run publish-local-release.yml \
+            --repo "$REPO" \
+            --ref distribution/v0.7.3
