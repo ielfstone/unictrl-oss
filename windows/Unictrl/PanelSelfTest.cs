@@ -68,7 +68,16 @@ internal static class PanelSelfTest
             Check(root.ActualHeight <= 502, "small work area height");
             Check(panel.MiddleScroll.ScrollableHeight > 0, "small screen scrolls middle"); AssertFooter(root); await Save(root, "panel-small-dark.png");
             panel.Toggle(); Check(!panel.AppWindow.IsVisible, "tray toggle hides panel"); panel.Show(); Check(panel.AppWindow.IsVisible, "tray opens panel");
-            Log.Write("panel_test", "passed screens_above_below latency controls receive progress cancel small_screen footer 150percent_render"); Finish(null);
+            // Focus must belong to the panel after opening from a tray callback. Moving focus to
+            // another top-level window is the same activation path as clicking outside it.
+            var outside = new Microsoft.UI.Xaml.Window { Content = new TextBlock { Text = "Outside panel" } };
+            outside.Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(outside));
+            await Task.Delay(200);
+            panel.Show(); await Task.Delay(200);
+            Check(GetForegroundWindow() == WinRT.Interop.WindowNative.GetWindowHandle(panel), "panel takes foreground");
+            outside.Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(outside)); await Task.Delay(200);
+            Check(!panel.AppWindow.IsVisible, "outside activation dismisses panel"); outside.Close();
+            Log.Write("panel_test", "passed screens_above_below latency controls receive progress cancel small_screen footer 150percent_render outside_dismiss"); Finish(null);
         }
         catch (Exception error) { Finish(error); }
     }
@@ -91,6 +100,7 @@ internal static class PanelSelfTest
         yield return parent;
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++) foreach (var child in Walk(VisualTreeHelper.GetChild(parent, i))) yield return child;
     }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     private static void Check(bool value, string name) { if (!value) throw new Exception(name); }
     private static void Finish(Exception? error)
     {

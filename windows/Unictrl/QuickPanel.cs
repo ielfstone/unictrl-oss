@@ -184,7 +184,7 @@ internal sealed class QuickPanel : Window
     }
     public void ClosePanel() { closing = true; Close(); }
     public void Toggle() { if (AppWindow.IsVisible) AppWindow.Hide(); else Show(); }
-    public void Show() { shown = true; Fit(); AppWindow.Show(); Activate(); }
+    public void Show() { shown = true; Fit(); AppWindow.Show(); Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)); }
     private void Fit()
     {
         Native.GetCursorPos(out var cursor); var area = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest).WorkArea;

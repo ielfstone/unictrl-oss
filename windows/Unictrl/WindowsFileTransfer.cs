@@ -101,7 +101,7 @@ internal sealed class WindowsFileTransfer : IDisposable
                     pasteId="blocked";var blockedIntent=Volatile.Read(ref clipboardIntent);
                     desktop.Write(new ClipboardContent(FileIntent:"blocked"),()=>Volatile.Read(ref clipboardIntent)==blockedIntent,
                         ()=>{lock(gate){if(Volatile.Read(ref clipboardIntent)==blockedIntent)pasteSequence=GetClipboardSequenceNumber();}});
-                    Notify(blocked);break;
+                    Report("Remote files copied · paste to continue");break;
                 case "clear":
                     foreach(var id in offers.Where(p=>p.Value.Mode=="clipboard").Select(p=>p.Key).ToArray())offers.Remove(id);
                     var clearedIntent=Interlocked.Increment(ref clipboardIntent);blocked=null;pasteId=null;pasteScheduled=false;desktop.ClearRemoteFiles(()=>Volatile.Read(ref clipboardIntent)==clearedIntent);Report("Clipboard file offer cleared");break;
@@ -156,7 +156,7 @@ internal sealed class WindowsFileTransfer : IDisposable
             catch(Exception error)
             {
                 var tooLarge=clipboard && paths.Sum(p=>{try{return new FileInfo(p).Length;}catch{return 0L;}})>FileProtocol.ClipboardLimit;
-                if(clipboard)Send(new("blocked",Reason:tooLarge?"too-large":"unsupported"));
+                if(clipboard) { Send(new("blocked",Reason:tooLarge?"too-large":"unsupported")); return; }
                 Notify(tooLarge?"Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file).":error.Message);
             }
         }

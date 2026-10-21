@@ -142,7 +142,7 @@ final class MacFileTransfer: ObservableObject {
             if offer.mode == "drop" { onAttention?("Incoming files: " + incoming + ". Open Unictrl to receive.") }
         case "blocked":
             beforeRemoteClipboard?(); localClipboardChanged(notify: false); blocked = command.reason == "too-large" ? "Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file)." : "These files cannot be pasted. Open Unictrl to transfer regular files; zip folders first."
-            writeIntent(); pasteLock.withLock { pasteID = "blocked"; pasteCount = board.changeCount }; attention(blocked!)
+            writeIntent(); pasteLock.withLock { pasteID = "blocked"; pasteCount = board.changeCount }; status = "Remote files copied · paste to continue"
         case "clear":
             beforeRemoteClipboard?()
             blocked = nil; if isRemoteFileClipboard { writeIntent() }
@@ -183,7 +183,7 @@ final class MacFileTransfer: ObservableObject {
         } catch {
             let tooLarge = clipboard && urls.reduce(Int64(0), { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }) > FileProtocol.clipboardLimit
             let text = tooLarge ? "Files exceed 100 MiB. Open Unictrl and drag the files into the transfer panel (up to 1 GiB per file)." : error.localizedDescription
-            if clipboard { send(FileCommand(kind: "blocked", reason: tooLarge ? "too-large" : "unsupported")) }
+            if clipboard { send(FileCommand(kind: "blocked", reason: tooLarge ? "too-large" : "unsupported")); return }
             attention(text)
         }
     }

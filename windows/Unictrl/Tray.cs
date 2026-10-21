@@ -102,7 +102,12 @@ internal sealed class Tray : IDisposable
         if (message == CallbackMessage)
         {
             var @event = (uint)(lParam & 0xFFFF);
-            if (@event is NinSelect or NinKeySelect or 0x405) PanelRequested?.Invoke();
+            if (@event is NinSelect or NinKeySelect or 0x405)
+            {
+                // The shell grants foreground activation to the tray callback thread.
+                Native.SetForegroundWindow(window);
+                PanelRequested?.Invoke();
+            }
             else if (@event == WmContextMenu) ShowMenu();
             return 0;
         }

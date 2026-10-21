@@ -4,6 +4,7 @@ import SwiftUI
 /// the paired PCs, the two scrolling switches as tiles, then actions.
 struct MenuPanel: View {
     @ObservedObject var controller: AppController
+    @State private var contentHeight: CGFloat = 1
 
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 10) {
@@ -39,8 +40,14 @@ struct MenuPanel: View {
             }
         }
         .padding(12)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: PanelContentHeight.self, value: geometry.size.height)
+        })
         }
-        .frame(width: 340, height: 680)
+        .frame(width: 340, height: min(contentHeight, max(200, (NSScreen.main?.visibleFrame.height ?? 760) - 80), 680))
+        .onPreferenceChange(PanelContentHeight.self) { height in
+            if height > 0, abs(contentHeight - height) > 0.5 { contentHeight = height }
+        }
     }
 
     private var header: some View {
@@ -187,4 +194,9 @@ private struct PermissionCallout: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.12)))
     }
+}
+
+private struct PanelContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

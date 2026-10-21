@@ -154,7 +154,8 @@ internal static class FileSelfTest
         }
         Check(requests.Distinct().Count()==12,"all repeated copies have independent intents");
         files.Control(MessageType.FileCommand,FileProtocol.Encode(new("blocked",Reason:"too-large"))[1..]);Thread.Sleep(100);
-        Check(state?.Notice.Contains("100 MiB")==true,"oversize explanation visible");Check(files.TryPaste(),"oversize paste cannot paste old file");
+        Check(state?.Notice.Contains("100 MiB")!=true,"copy does not display oversize notice");Check(files.TryPaste(),"oversize paste cannot paste old file");
+        Check(SpinWait.SpinUntil(()=>state?.Notice.Contains("100 MiB")==true,3000),"paste displays oversize notice");
         desktop.Write("repeat file test complete",()=>true);Thread.Sleep(50);
     }
     [DllImport("user32.dll")]private static extern bool IsClipboardFormatAvailable(uint format);
