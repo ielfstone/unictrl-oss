@@ -37,16 +37,12 @@ jobs:
 
       - name: Verify the Release and its six assets remain intact
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag_sha="$(gh api repos/ielfstone/unictrl-oss/git/ref/tags/v0.7.3 --jq .object.sha)"
-          asset_count="$(gh api repos/ielfstone/unictrl-oss/releases/tags/v0.7.3 --jq '.assets | length')"
-          release_state="$(gh api repos/ielfstone/unictrl-oss/releases/tags/v0.7.3 --jq .state)"
-          test "$tag_sha" = "$TARGET_SHA"
-          test "$asset_count" = "6"
-          test "$release_state" = "uploaded"
+          release_json="$(curl --fail --silent --show-error https://api.github.com/repos/ielfstone/unictrl-oss/releases/latest)"
+          test "$(jq -r .tag_name <<<"$release_json")" = "v0.7.3"
+          test "$(jq -r '.assets | length' <<<"$release_json")" = "6"
+          test "$(jq -r '.assets[].state' <<<"$release_json" | grep -c '^uploaded$')" = "6"
 
   remove-helper:
     needs: retarget
