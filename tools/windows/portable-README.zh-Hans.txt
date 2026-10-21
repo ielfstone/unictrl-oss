@@ -1,4 +1,4 @@
-Unictrl 0.7.2 界面预览 — 双向文本和图片剪贴板（个人 Fork 测试版）
+Unictrl 0.7.3 — 双向文本和图片剪贴板（个人 Fork 测试版）
 
 完整解压后运行 Unictrl.exe，保留全部 DLL 与子目录。旧版升级请先退出旧程序，把原来的 Data 文件夹复制到新软件目录，配对即可保留。
 
@@ -9,9 +9,13 @@ Mac 配对多台 PC 时，请在 Windows PC 下拉框选定一台；只有一台
 
 仅提供复制内容的同步，粘贴快捷键仍沿用你当前的键盘布局。目标应用必须允许粘贴文本。
 这是本地 Fork 的版本，不是原作者的官方发行。基于 GPL-3.0，许可证随包提供，匹配源码独立提供，见 SOURCE.txt。
-源代码：https://github.com/ielfstone/unictrl-oss/tree/feature/windows-panel-preview
+源代码：https://github.com/ielfstone/unictrl-oss/tree/fix/tray-native-frame
 
 自动更新：启动及每六小时检查此 fork 的稳定发布，后台验签、下载。完成后点 Restart and update，或从托盘菜单退出时自动替换并重启。Data 文件夹与配对保留，旧程序保存在同级 .previous 目录。可在 Software updates 中关闭自动检查。仅更新到本 fork 发布且验签成功的版本。
+
+0.7.3：托盘窗口与文件选择修复：
+- Windows 托盘使用真实窗口圆角，移除方框和多余滚动条，底边贴近任务栏；小屏幕仅在内容放不下时滚动中间区域。
+- 两端托盘移除 Reverse Wheel / Smooth Scroll，设置中仍可调整。Mac 文件选择器主动置前，重复点击只唤回已有窗口。
 
 0.7.2：文件传输与安装版：
 - 推荐下载同版 windows-x64-Setup.exe，首次安装可选旧便携文件夹，导入 Data/settings.json；之后配置在 %LOCALAPPDATA%\Unictrl，升级保留安装路径和配置。

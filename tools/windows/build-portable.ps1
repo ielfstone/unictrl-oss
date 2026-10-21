@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'artifacts' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $stage = Join-Path $out ('windows-stage-' + [guid]::NewGuid().ToString('N'))
-$packageName = 'Unictrl-0.7.2-windows-x64-portable'
+$packageName = 'Unictrl-0.7.3-windows-x64-portable'
 $payload = Join-Path $stage $packageName
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 $project = Join-Path $repo 'windows/Unictrl/Unictrl.csproj'
@@ -94,10 +94,10 @@ foreach ($dir in $sourceRoots) {
 foreach ($file in Get-ChildItem -LiteralPath $repo -File) {
     if ($file.Extension -eq '.md' -or $file.Name -eq 'LICENSE') { Copy-Item $file.FullName $sourceStage }
 }
-Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $out 'Unictrl-0.7.2-Source.zip')
+Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $out 'Unictrl-0.7.3-Source.zip')
 'Source for this build: https://github.com/ielfstone/unictrl-oss/tree/' + $env:GITHUB_SHA | Set-Content (Join-Path $payload 'SOURCE.txt') -Encoding utf8
 $buildInfo = [ordered]@{
-    version = '0.7.2'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
+    version = '0.7.3'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
     layoutVersion = 2; feature = 'unified tray panel, native file paste and Receive to Downloads'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }

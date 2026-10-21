@@ -54,7 +54,7 @@ jobs:
           $tag = 'v' + $config.version
           gh release view $tag --repo ielfstone/unictrl-oss 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; preserve the published version.' }
-          gh release create $tag --repo ielfstone/unictrl-oss --target $config.sourceCommit --draft --title "Unictrl $($config.version) · 托盘界面与原生文件粘贴" --notes-file distribution/NOTES.zh-Hans.md
+          gh release create $tag --repo ielfstone/unictrl-oss --target $config.sourceCommit --draft --title "Unictrl $($config.version) · 托盘窗口与文件选择修复" --notes-file distribution/NOTES.zh-Hans.md
           if ($LASTEXITCODE -ne 0) { throw 'Cannot create draft release.' }
           gh release upload $tag --repo ielfstone/unictrl-oss distribution/update-v1.json "distribution/Unictrl-$($config.version)-macOS-universal-update.zip" "distribution/Unictrl-$($config.version)-macOS-universal.dmg" "distribution/windows/Unictrl-$($config.version)-windows-x64-portable.zip" "distribution/windows/Unictrl-$($config.version)-windows-x64-Setup.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; draft remains unpublished.' }
