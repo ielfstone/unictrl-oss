@@ -163,7 +163,7 @@ internal sealed class QuickPanel : Window
         foreach (var screen in layout.Screens)
         {
             var r = rectangles[screen.Id]; var active = peer.ThisPCActive ? screen.Id == layout.You : screen.IsMac;
-            var text = Text(screen.IsMac ? "Mac" : screen.Id == layout.You ? "Windows · this PC" : "Windows", 10, true); text.HorizontalAlignment = HorizontalAlignment.Center; text.VerticalAlignment = VerticalAlignment.Center; text.TextWrapping = TextWrapping.NoWrap; text.TextTrimming = TextTrimming.CharacterEllipsis; text.Foreground = active ? new SolidColorBrush(Microsoft.UI.Colors.White) : Pine;
+            var text = Text(screen.IsMac ? "Mac" : "Windows", 10, true); text.HorizontalAlignment = HorizontalAlignment.Center; text.VerticalAlignment = VerticalAlignment.Center; text.TextWrapping = TextWrapping.NoWrap; text.TextTrimming = TextTrimming.CharacterEllipsis; text.Foreground = active ? new SolidColorBrush(Microsoft.UI.Colors.White) : Pine;
             var tile = new Border { Tag = screen.Id, Width = Math.Max(1, r.Width * scale - 2), Height = Math.Max(1, r.Height * scale - 2), CornerRadius = new(5), Background = active ? Pine : new SolidColorBrush(Windows.UI.Color.FromArgb(45, 22, 135, 99)), Child = text, BorderThickness = new(1), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 22, 135, 99)), Opacity = screen.Online || screen.Id == layout.You ? 1 : .5 };
             ToolTipService.SetToolTip(tile, screen.Name + (active ? " · In use" : "")); Canvas.SetLeft(tile, x + r.X * scale + 1); Canvas.SetTop(tile, y + r.Y * scale + 1); screens.Children.Add(tile);
         }
@@ -196,7 +196,11 @@ internal sealed class QuickPanel : Window
         var max = Math.Min(PreviewMaxHeight ?? 680, area.Height / scale - 24);
         var height = Math.Min(natural, Math.Max(260, max));
         var pxWidth = (int)Math.Ceiling(width * scale); var pxHeight = (int)Math.Ceiling(height * scale);
-        AppWindow.MoveAndResize(new RectInt32(Math.Max(area.X, area.X + area.Width - pxWidth - 12), Math.Max(area.Y, area.Y + area.Height - pxHeight - 12), pxWidth, pxHeight));
+        // Size the client, not the outer frame: the invisible resize border otherwise steals
+        // several DIPs and clips the bottom wheel controls after an incoming offer expands the card.
+        AppWindow.ResizeClient(new SizeInt32(pxWidth, pxHeight));
+        var outer = AppWindow.Size;
+        AppWindow.Move(new PointInt32(Math.Max(area.X, area.X + area.Width - outer.Width - 12), Math.Max(area.Y, area.Y + area.Height - outer.Height - 12)));
     }
     private async void Choose(object sender, RoutedEventArgs e)
     {
