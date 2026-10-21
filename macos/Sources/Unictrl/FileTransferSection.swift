@@ -35,7 +35,7 @@ struct FileTransferCard: View {
                 VStack(spacing: 5) {
                     Image(systemName: "tray.and.arrow.up").font(.title2).foregroundStyle(Color.pine)
                     Text("Drop files to send").font(.system(size: 12, weight: .medium))
-                    Button("Choose files…") { chooseFiles() }.controlSize(.small).disabled(service.busy)
+                    Button("Choose files…") { service.chooseFiles() }.controlSize(.small).disabled(service.busy)
                 }
                 .frame(maxWidth: .infinity).padding(10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(hovering ? Color.pine.opacity(0.16) : Color.secondary.opacity(0.06)))
@@ -67,10 +67,6 @@ struct FileTransferCard: View {
         if value.hasPrefix("Files ready ·") { return "Files ready" }
         if value.hasPrefix("Files offered ·") { return "Files offered" }
         return value
-    }
-    private func chooseFiles() {
-        let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
-        panel.begin { if $0 == .OK { service.offer(panel.urls) } }
     }
     private func drop(_ providers: [NSItemProvider]) -> Bool {
         guard !service.busy, providers.count <= 32 else { return false }

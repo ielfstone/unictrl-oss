@@ -64,6 +64,11 @@ final class MacFileTransfer: ObservableObject {
     private let marker = UUID().uuidString
     private static let markerType = NSPasteboard.PasteboardType("com.unictrl.remote-files")
     private var prepared: [String: [URL]] = [:], saveWhenReady: [String: URL] = [:]
+    private var filePicker: FilePickerCoordinator?
+    @MainActor func chooseFiles() {
+        if filePicker == nil { filePicker = FilePickerCoordinator() }
+        filePicker?.chooseFiles { [weak self] urls in self?.offer(urls) }
+    }
     private var fileProviders: [PreparedFileProvider] = []
     var canReceive: Bool { !incoming.isEmpty && (!busy || grant?.paste != nil) }
     private var blocked: String?

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The menu bar panel, laid out like Control Center: status and master switch, the screens,
-/// the paired PCs, the two scrolling switches as tiles, then actions.
+/// the paired PCs, file transfer, then actions.
 struct MenuPanel: View {
     @ObservedObject var controller: AppController
     @State private var contentHeight: CGFloat = 1
@@ -28,10 +28,6 @@ struct MenuPanel: View {
                 devices
             }
             FileTransferSection(controller: controller, service: controller.files)
-            HStack(spacing: 8) {
-                ToggleTile(title: "Reverse Wheel", systemImage: "arrow.up.arrow.down", isOn: $controller.reverseMouseWheel)
-                ToggleTile(title: "Smooth Scroll", systemImage: "scroll", isOn: $controller.smoothScrolling)
-            }
             Divider().padding(.horizontal, 4)
             VStack(spacing: 0) {
                 PanelRow(title: "Pair a Windows PC…", systemImage: "plus.circle") { controller.startPairing() }
@@ -112,40 +108,6 @@ struct StatusLabel: View {
         guard device.online else { return "Offline" }
         if inUse { return "In use" }
         return device.latencyMs.map { "\($0) ms" } ?? "Connected"
-    }
-}
-
-/// A Control Center style switch: a round icon that fills with colour when on.
-private struct ToggleTile: View {
-    let title: String
-    let systemImage: String
-    @Binding var isOn: Bool
-    @State private var hovering = false
-
-    var body: some View {
-        Button { isOn.toggle() } label: {
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle().fill(isOn ? AnyShapeStyle(Color.pine) : AnyShapeStyle(.quaternary))
-                    Image(systemName: systemImage).font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(isOn ? .white : .primary)
-                }
-                .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(isOn ? "On" : "Off").font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.quaternary.opacity(hovering ? 0.9 : 0.6)))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 

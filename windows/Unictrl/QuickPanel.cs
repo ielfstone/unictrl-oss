@@ -11,9 +11,9 @@ using Windows.Foundation;
 namespace Unictrl;
 
 internal sealed record QuickPanelActions(Action OpenSettings, Action<bool> SetEnabled, Action EnableSharing, Action Pair,
-    Action<ScrollPreferences> SetScroll, Action<ArrangementInfo> Arrange, Action Quit);
+    Action<ArrangementInfo> Arrange, Action Quit);
 internal sealed record QuickPanelPeer(string Status, bool Connected, ArrangementInfo? Arrangement = null,
-    QualityInfo? Quality = null, bool ThisPCActive = false, ScrollPreferences? Scroll = null);
+    QualityInfo? Quality = null, bool ThisPCActive = false);
 
 /// Compact Control Center surface matching the Mac's menu panel. The middle scrolls on small displays;
 /// the master switch and menu actions stay reachable at every supported DPI.
@@ -29,7 +29,12 @@ internal sealed class QuickPanel : Window
     private readonly TextBlock connection = Text("Waiting for Mac", 11), status = Text("Files ready", 11), incoming = Text("", 11), notice = Text("", 11);
     private readonly ProgressBar progress = new() { Maximum = 100, Height = 3 };
     private readonly Button receive = SmallButton("Receive to Downloads"), cancel = SmallButton("Cancel"), choose = SmallButton("Choose files…");
-    private readonly Button enableFiles = SmallButton("Enable file sharing"), reverse, smooth;
+    private readonly Button enableFiles = SmallButton("Enable file sharing");
+    private readonly PopupFrame frame;
+    private FrameworkElement headerLayout = null!, footerLayout = null!;
+    private bool fitting;
+    private double fittedScale;
+    internal PopupFrame NativeFrame => frame;
     private readonly Border inbox, drop, notification;
     private readonly ToggleSwitch enabled;
     private QuickPanelPeer peer = new("Waiting for Mac", false);
@@ -49,6 +54,7 @@ internal sealed class QuickPanel : Window
             presenter.SetBorderAndTitleBar(false, false); presenter.IsResizable = false;
             presenter.IsMaximizable = false; presenter.IsMinimizable = false; presenter.IsAlwaysOnTop = true;
         }
+        frame = new PopupFrame(WinRT.Interop.WindowNative.GetWindowHandle(this));
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
         root.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
@@ -98,21 +104,22 @@ internal sealed class QuickPanel : Window
         notification = Card(notice, 8); fileCard.Children.Add(notification);
         body.Children.Add(new Border { Child = fileCard, Padding = new(10), CornerRadius = new(12), Background = Surface() });
 
-        var wheel = new Grid { ColumnSpacing = 8 }; Columns(wheel, new(1, GridUnitType.Star), new(1, GridUnitType.Star));
-        reverse = WheelTile("Reverse Wheel", "\uE8CB", true); smooth = WheelTile("Smooth Scroll", "\uE8CB", false);
-        wheel.Children.Add(reverse); Grid.SetColumn(smooth, 1); wheel.Children.Add(smooth); body.Children.Add(wheel);
         var menu = new StackPanel { Spacing = 1 }; menu.Children.Add(new Border { Height = 1, Background = Surface(), Margin = new Thickness(0, 0, 0, 5) });
         menu.Children.Add(MenuRow("Pair a Mac…", "\uE710", () => { AppWindow.Hide(); actions.Pair(); }));
         menu.Children.Add(MenuRow("Settings & history…", "\uE713", OpenSettings)); menu.Children.Add(MenuRow("Quit Unictrl", "\uE7E8", actions.Quit));
-        Grid.SetRow(menu, 2); root.Children.Add(menu);
-        Content = new Border { CornerRadius = new(12), BorderThickness = new(1), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 128, 128, 128)), Background = (Brush)Application.Current.Resources["ApplicationPageBackgroundThemeBrush"], Child = root };
+        Grid.SetRow(menu, 2); root.Children.Add(menu); headerLayout = header; footerLayout = menu;
+        Content = new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 248, 248, 248)), Child = root };
         Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !picking) { lastDeactivated = Environment.TickCount64; AppWindow.Hide(); } };
         AppWindow.Closing += (_, e) => { if (!closing) { e.Cancel = true; AppWindow.Hide(); } };
         root.ActualThemeChanged += (_, _) => {
             if (Content is Border surface) surface.Background = new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 248, 248, 248));
-            UpdateWheel(reverse, peer.Scroll?.Reverse ?? false); UpdateWheel(smooth, peer.Scroll?.Smooth ?? false); RenderDevices();
+            frame.SetDark(root.ActualTheme == ElementTheme.Dark); RenderDevices();
         };
-        root.Loaded += (_, _) => { RenderScreens(); if (shown) Fit(); };
+        root.Loaded += (_, _) => {
+            RenderScreens();
+            root.XamlRoot.Changed += (_, _) => { if (shown && Math.Abs(root.XamlRoot.RasterizationScale - fittedScale) > .001) Fit(); };
+            if (shown) Fit();
+        };
         Update(new("Enable files on both computers")); UpdatePeer(peer);
     }
     private static void Columns(Grid grid, params GridLength[] widths) { foreach (var width in widths) grid.ColumnDefinitions.Add(new() { Width = width }); }
@@ -144,25 +151,12 @@ internal sealed class QuickPanel : Window
         var button = new Button { Content = row, Padding = new Thickness(8, 5, 8, 5), MinHeight = 30, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
         button.Click += (_, _) => action(); return button;
     }
-    private Button WheelTile(string name, string glyph, bool reversed)
-    {
-        var button = new Button { Padding = new Thickness(8), MinHeight = 52, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Surface(), CornerRadius = new(10), BorderThickness = new(0) };
-        button.Tag = name; button.Click += (_, _) => { if (peer.Connected && peer.Scroll is { } value) actions.SetScroll(reversed ? value with { Reverse = !value.Reverse } : value with { Smooth = !value.Smooth }); };
-        return button;
-    }
-    private void UpdateWheel(Button button, bool on)
-    {
-        var row = new Grid { ColumnSpacing = 7 }; Columns(row, GridLength.Auto, new(1, GridUnitType.Star));
-        row.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new(13), Background = on ? Pine : Surface(), Child = new FontIcon { Glyph = button == reverse ? "↕" : "≋", FontFamily = new FontFamily("Segoe UI"), FontSize = 14, Foreground = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : new SolidColorBrush(root.ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black) } });
-        var text = new StackPanel { Spacing = 1 }; text.Children.Add(Text((string)button.Tag, 11, true)); var state = Text(peer.Scroll is null ? "Connect / update Mac" : on ? "On" : "Off", 10); state.Opacity = .65; text.Children.Add(state); Grid.SetColumn(text, 1); row.Children.Add(text); button.Content = row;
-        button.IsEnabled = peer.Connected && peer.Scroll is not null;
-    }
     private void OpenSettings() { AppWindow.Hide(); actions.OpenSettings(); }
     public void UpdatePeer(QuickPanelPeer value)
     {
         var redraw = !ReferenceEquals(peer.Arrangement, value.Arrangement) || peer.Connected != value.Connected || peer.ThisPCActive != value.ThisPCActive;
         peer = value; connection.Text = !settings.Enabled ? "Paused" : value.Status; enabled.IsOn = settings.Enabled;
-        UpdateWheel(reverse, value.Scroll?.Reverse ?? false); UpdateWheel(smooth, value.Scroll?.Smooth ?? false); RenderDevices();
+        RenderDevices();
         if (redraw) RenderScreens();
     }
     private void RenderDevices()
@@ -224,20 +218,25 @@ internal sealed class QuickPanel : Window
     public void Show() { shown = true; Fit(); AppWindow.Show(); Activate(); Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)); }
     private void Fit()
     {
-        Native.GetCursorPos(out var cursor); var area = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest).WorkArea;
-        var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        var width = Math.Min(360, Math.Max(280, area.Width / scale - 24));
-        // Measure natural content first; reserve header and footer outside the scrollable middle.
-        body.Measure(new Size(width - 26, double.PositiveInfinity));
-        var natural = body.DesiredSize.Height + 34 + 101 + 24 + 20 + 2;
-        var max = Math.Min(PreviewMaxHeight ?? 680, area.Height / scale - 24);
-        var height = Math.Min(natural, Math.Max(260, max));
-        var pxWidth = (int)Math.Ceiling(width * scale); var pxHeight = (int)Math.Ceiling(height * scale);
-        // Size the client, not the outer frame: the invisible resize border otherwise steals
-        // several DIPs and clips the bottom wheel controls after an incoming offer expands the card.
-        AppWindow.ResizeClient(new SizeInt32(pxWidth, pxHeight));
-        var outer = AppWindow.Size;
-        AppWindow.Move(new PointInt32(Math.Max(area.X, area.X + area.Width - outer.Width - 12), Math.Max(area.Y, area.Y + area.Height - outer.Height - 12)));
+        if (fitting) return; fitting = true;
+        try
+        {
+            Native.GetCursorPos(out var cursor); var area = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest).WorkArea;
+            var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0; fittedScale = scale;
+            var width = Math.Min(360, Math.Max(280, area.Width / scale - 16));
+            var contentWidth = width - root.Padding.Left - root.Padding.Right;
+            headerLayout.Measure(new Size(contentWidth, double.PositiveInfinity)); footerLayout.Measure(new Size(contentWidth, double.PositiveInfinity)); body.Measure(new Size(contentWidth, double.PositiveInfinity));
+            var natural = Math.Ceiling(headerLayout.DesiredSize.Height + footerLayout.DesiredSize.Height + body.DesiredSize.Height + root.Padding.Top + root.Padding.Bottom + root.RowSpacing * 2) + 1;
+            var maximum = Math.Min(PreviewMaxHeight ?? 680, area.Height / scale - 8);
+            var height = Math.Min(natural, Math.Max(200, maximum));
+            var needsScroll = natural > height + .5;
+            scroll.VerticalScrollMode = needsScroll ? ScrollMode.Enabled : ScrollMode.Disabled;
+            scroll.VerticalScrollBarVisibility = needsScroll ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+            AppWindow.ResizeClient(new SizeInt32((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale)));
+            var client = frame.ClientBounds; root.Width = (client.Right - client.Left) / scale; root.Height = (client.Bottom - client.Top) / scale;
+            root.UpdateLayout(); frame.Align(area, (int)Math.Round(8 * scale));
+        }
+        finally { fitting = false; }
     }
     private async void Choose(object sender, RoutedEventArgs e)
     {

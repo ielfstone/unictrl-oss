@@ -1,7 +1,7 @@
 name: Windows panel preview and package size audit
 on:
   push:
-    branches: [feature/windows-panel-preview]
+    branches: [feature/windows-panel-preview, fix/tray-native-frame]
   workflow_dispatch:
 permissions:
   contents: read

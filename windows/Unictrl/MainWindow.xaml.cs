@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private bool quitting;
     private bool startsAtLogin;
     private bool connected;
+    private bool updatingScrollPreferences;
 
     public MainWindow()
     {
@@ -153,10 +154,27 @@ public sealed partial class MainWindow : Window
             ShowWindow, value => EnabledSwitch.IsOn = value,
             () => { ClipboardSwitch.IsOn = true; ClipboardFilesSwitch.IsOn = true; },
             () => { ShowWindow(); OnPairAgain(this, new RoutedEventArgs()); },
-            value => receiver?.SetScrollPreferences(value), CommitLayout, Quit));
+            CommitLayout, Quit));
         quickPanel.Update(lastFileState); RefreshQuickPanel();
     }
-    private void RefreshQuickPanel() => quickPanel?.UpdatePeer(new(StatusText.Text, connected, arrangement, receiver?.Quality, receiver?.IsInUse ?? false, receiver?.Preferences));
+    private void RefreshQuickPanel()
+    {
+        quickPanel?.UpdatePeer(new(StatusText.Text, connected, arrangement, receiver?.Quality, receiver?.IsInUse ?? false));
+        updatingScrollPreferences = true;
+        try
+        {
+            var preferences = receiver?.Preferences;
+            ReverseWheelSwitch.IsEnabled = SmoothWheelSwitch.IsEnabled = connected && preferences is not null;
+            if (preferences is not null) { ReverseWheelSwitch.IsOn = preferences.Reverse; SmoothWheelSwitch.IsOn = preferences.Smooth; }
+            WheelPreferencesStatus.Text = preferences is null ? "Connect to an updated Mac to change shared wheel settings" : "Reverse changes wheel direction; smooth scrolling adds interpolation. Settings are saved on the paired Mac.";
+        }
+        finally { updatingScrollPreferences = false; }
+    }
+    private void OnScrollPreferencesToggled(object sender, RoutedEventArgs e)
+    {
+        if (!updatingScrollPreferences && connected && receiver?.Preferences is not null)
+            receiver.SetScrollPreferences(new(ReverseWheelSwitch.IsOn, SmoothWheelSwitch.IsOn));
+    }
     private void OnOpenTransferPanel(object sender, RoutedEventArgs e) { EnsureQuickPanel(); quickPanel!.Show(); }
     private void OnClearHistory(object sender, RoutedEventArgs e) => clipboard.Files.ClearHistory();
     private void OnClearFileCache(object sender, RoutedEventArgs e) => clipboard.Files.CleanCache(true);

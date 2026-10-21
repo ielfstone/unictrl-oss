@@ -61,7 +61,7 @@ $log = Join-Path $payload 'Data/unictrl.log'
 if (-not (Test-Path $log) -or -not (Select-String -LiteralPath $log -Pattern 'discover_test' -Quiet)) { throw 'Smoke test did not reach the application diagnostic.' }
 $panelProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--panel-test' -WorkingDirectory $payload -PassThru
 if (-not $panelProcess.WaitForExit(30000)) { $panelProcess.Kill(); Get-Content $log; throw 'Tray panel native test timed out.' }
-Get-ChildItem (Join-Path $payload 'Data') -Filter 'panel-*.png' | Copy-Item -Destination (Join-Path $out 'windows-tests')
+Get-ChildItem (Join-Path $payload 'Data') -Include 'panel-*.png','panel-*.json' -Recurse | Copy-Item -Destination (Join-Path $out 'windows-tests')
 if ($panelProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'panel_test passed' -Quiet)) { Get-Content $log; throw 'Tray panel native test failed.' }
 $clipboardProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--clipboard-test' -WorkingDirectory $payload -PassThru
 if (-not $clipboardProcess.WaitForExit(40000)) { $clipboardProcess.Kill(); throw 'Clipboard native integration test timed out.' }

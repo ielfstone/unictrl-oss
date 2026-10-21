@@ -22,13 +22,13 @@ internal static class PanelSelfTest
             desktop = new DesktopClipboard(_ => { }, _ => { });
             var settings = new Settings { DeviceId = pc, MacName = "MacBook Pro", ClipboardEnabled = true, ClipboardFilesEnabled = true };
             files = new WindowsFileTransfer(settings, desktop, _ => { });
-            panel = new QuickPanel(settings, files, new QuickPanelActions(() => { }, _ => { }, () => { }, () => { }, _ => { }, _ => { }, () => { }));
+            panel = new QuickPanel(settings, files, new QuickPanelActions(() => { }, _ => { }, () => { }, () => { }, _ => { }, () => { }));
             panel.PanelRoot.RequestedTheme = ElementTheme.Light;
             var layout = new ArrangementInfo(pc, [
                 new("mac", "MacBook Pro", 320, 200, 0, true, 0, 0, 2),
                 new(pc, "Windows PC", 520, 300, -250, true, 0, -250, 2)]);
             var quality = new QualityInfo("smooth", 3, 5, 20, null, null);
-            panel.UpdatePeer(new("Connected to MacBook Pro", true, layout, quality, true, new(true, true)));
+            panel.UpdatePeer(new("Connected to MacBook Pro", true, layout, quality, true));
             panel.Update(new("Files ready · copy ≤100 MiB · drag ≤1 GiB/file"));
             panel.Show();
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) }; timer.Tick += Verify; timer.Start();
@@ -50,8 +50,9 @@ internal static class PanelSelfTest
             Check(!controls.OfType<TextBlock>().Any(t => t.Text.Contains("cache clears after") || t.Text.Contains("recipient accepts first")), "instructions do not occupy panel space");
             Check(controls.OfType<TextBlock>().Any(t => t.Text.Contains("3 ms")), "connection latency");
             Check(controls.OfType<TextBlock>().Any(t => t.Text == "MacBook Pro") && controls.OfType<TextBlock>().Any(t => t.Text == "Windows PC"), "device rows");
-            Check(controls.OfType<Button>().Any(b => Equals(b.Tag, "Reverse Wheel") && b.IsEnabled), "reverse wheel control");
-            Check(controls.OfType<Button>().Any(b => Equals(b.Tag, "Smooth Scroll") && b.IsEnabled), "smooth scroll control");
+            Check(!controls.OfType<TextBlock>().Any(t => t.Text is "Reverse Wheel" or "Smooth Scroll"), "infrequent wheel controls stay in settings");
+            Check(panel.MiddleScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Disabled && panel.MiddleScroll.ScrollableHeight < 1, "no unnecessary scrolling in normal panel");
+            VerifyNativeWindow("panel-native-desktop.png");
             Check(controls.OfType<TextBlock>().Any(t => t.Text == "Pair a Mac…"), "pair action");
             Check(!panel.AppWindow.IsShownInSwitchers, "tray panel stays out of taskbar");
             var tiles = panel.ScreenCanvas.Children.OfType<Border>().ToArray();
@@ -61,6 +62,8 @@ internal static class PanelSelfTest
             panel.Show(); await Task.Delay(250); root.UpdateLayout();
             Check(Walk(root).OfType<Button>().Any(b => Equals(b.Content, "Receive to Downloads") && b.IsEnabled), "receive actionable");
             AssertFooter(root); await Save(root, "panel-incoming.png");
+            Check(panel.MiddleScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Disabled && panel.MiddleScroll.ScrollableHeight < 1, "incoming panel fits without scrollbar");
+            VerifyNativeWindow("panel-native-incoming-desktop.png");
             panel.Update(new("Ready for native paste · or save to Downloads", "2 files · 64 MiB · report.pdf, photo.png"));
             panel.Show(); await Task.Delay(250); root.UpdateLayout(); AssertFooter(root); await Save(root, "panel-paste-ready.png");
             panel.Update(new("Receiving files · 42%", "2 files · 640 MiB · presentation.zip, video.mp4", true, .42));
@@ -93,6 +96,30 @@ internal static class PanelSelfTest
         var quit = Walk(root).OfType<TextBlock>().Single(t => t.Text == "Quit Unictrl");
         var at = quit.TransformToVisual(root).TransformPoint(new Point(0, 0));
         Check(at.Y >= 0 && at.Y + quit.ActualHeight <= root.ActualHeight, "quit action inside window");
+        Check(root.ActualHeight - at.Y - quit.ActualHeight <= 26, "no blank area below final action");
+    }
+    private static void VerifyNativeWindow(string screenshot)
+    {
+        var frame = panel!.NativeFrame; var outer = frame.WindowBounds; var client = frame.ClientBounds; var visible = frame.VisibleBounds;
+        var area = Microsoft.UI.Windowing.DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(visible.Left + 8, visible.Top + 8), Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
+        Check((frame.Style & 0x00CF0000L) == 0 && (frame.Style & 0x80000000L) != 0, "native popup has no overlapped window frame");
+        Check(outer.Right - outer.Left == client.Right && outer.Bottom - outer.Top == client.Bottom, "native client and outer size agree");
+        Check(Math.Abs(visible.Bottom - area.WorkArea.Y - area.WorkArea.Height) <= 1, "visible panel meets taskbar work-area edge");
+        Check(frame.CornerPreference is 2 or -1, "native rounded corner preference");
+        var scale = panel.PanelRoot.XamlRoot.RasterizationScale;
+        Check(Math.Abs(panel.PanelRoot.ActualWidth * scale - client.Right) <= 1 && Math.Abs(panel.PanelRoot.ActualHeight * scale - client.Bottom) <= 1, "XAML fits actual native client at current DPI");
+        var report = new { window = new { outer.Left, outer.Top, outer.Right, outer.Bottom }, client = new { client.Right, client.Bottom }, visible = new { visible.Left, visible.Top, visible.Right, visible.Bottom }, workArea = area.WorkArea, cornerPreference = frame.CornerPreference, scale, scrollableHeight = panel.MiddleScroll.ScrollableHeight };
+        File.WriteAllText(Path.Combine(Settings.Directory, "panel-native-geometry.json"), System.Text.Json.JsonSerializer.Serialize(report));
+        try
+        {
+            var monitor = area.OuterBounds;
+            var left = Math.Max(monitor.X, visible.Left - 16); var top = Math.Max(monitor.Y, visible.Top - 16);
+            var right = Math.Min(monitor.X + monitor.Width, visible.Right + 16); var bottom = Math.Min(monitor.Y + monitor.Height, visible.Bottom + 56);
+            using var bitmap = new System.Drawing.Bitmap(right - left, bottom - top);
+            using (var drawing = System.Drawing.Graphics.FromImage(bitmap)) drawing.CopyFromScreen(left, top, 0, 0, bitmap.Size);
+            bitmap.Save(Path.Combine(Settings.Directory, screenshot), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        catch (Exception error) { Log.Write("panel_desktop_capture_unavailable", error.GetType().Name + ": " + error.Message); }
     }
     private static async Task Save(FrameworkElement root, string name, double scale = 1)
     {
