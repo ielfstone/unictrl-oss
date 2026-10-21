@@ -59,6 +59,10 @@ if (-not $process.WaitForExit(30000)) {
 if ($process.ExitCode -ne 0) { throw "Windows runtime smoke test failed: exit $($process.ExitCode)" }
 $log = Join-Path $payload 'Data/unictrl.log'
 if (-not (Test-Path $log) -or -not (Select-String -LiteralPath $log -Pattern 'discover_test' -Quiet)) { throw 'Smoke test did not reach the application diagnostic.' }
+$panelProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--panel-test' -WorkingDirectory $payload -PassThru
+if (-not $panelProcess.WaitForExit(30000)) { $panelProcess.Kill(); Get-Content $log; throw 'Tray panel native test timed out.' }
+Get-ChildItem (Join-Path $payload 'Data') -Filter 'panel-*.png' | Copy-Item -Destination (Join-Path $out 'windows-tests')
+if ($panelProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'panel_test passed' -Quiet)) { Get-Content $log; throw 'Tray panel native test failed.' }
 $clipboardProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--clipboard-test' -WorkingDirectory $payload -PassThru
 if (-not $clipboardProcess.WaitForExit(40000)) { $clipboardProcess.Kill(); throw 'Clipboard native integration test timed out.' }
 if ($clipboardProcess.ExitCode -ne 0) { Get-Content $log; throw 'Clipboard native integration test failed.' }
@@ -70,10 +74,6 @@ $fileProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -Argum
 if (-not $fileProcess.WaitForExit(120000)) { $fileProcess.Kill(); Get-Content $log; throw 'File native integration test timed out.' }
 if ($fileProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'files_test passed' -Quiet)) { Get-Content $log; throw 'File native integration test failed.' }
 Write-Host "FILE_TRANSFER_TEST=passed encrypted_bidirectional_1GiB acceptance cancellation native_file_list"
-$panelProcess = Start-Process -FilePath (Join-Path $payload 'Unictrl.exe') -ArgumentList '--panel-test' -WorkingDirectory $payload -PassThru
-if (-not $panelProcess.WaitForExit(30000)) { $panelProcess.Kill(); Get-Content $log; throw 'Tray panel native test timed out.' }
-if ($panelProcess.ExitCode -ne 0 -or -not (Select-String -LiteralPath $log -Pattern 'panel_test passed' -Quiet)) { Get-Content $log; throw 'Tray panel native test failed.' }
-Get-ChildItem (Join-Path $payload 'Data') -Filter 'panel-*.png' | Copy-Item -Destination (Join-Path $out 'windows-tests')
 # Exclude diagnostic-generated personal state from the distributable archive.
 Remove-Item -LiteralPath (Join-Path $payload 'Data') -Recurse -Force
 $sourceStage = Join-Path $stage 'Source'
@@ -99,7 +99,7 @@ Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path 
 $buildInfo = [ordered]@{
     version = '0.7.2'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
-    layoutVersion = 2; feature = 'text and PNG clipboard with signed automatic updates'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
+    layoutVersion = 2; feature = 'unified tray panel preview with on-demand file transfers'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $buildInfo | ConvertTo-Json | Set-Content (Join-Path $payload 'BUILD-INFO.json') -Encoding utf8
 $zip = Join-Path $out ($packageName + '.zip')

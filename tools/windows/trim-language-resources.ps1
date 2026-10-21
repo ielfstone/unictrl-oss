@@ -12,4 +12,5 @@ foreach($folder in Get-ChildItem -LiteralPath $Payload -Directory) {
     $removed+=@([ordered]@{language=$folder.Name;files=$files.Count;bytes=($files | Measure-Object Length -Sum).Sum})
     Remove-Item -LiteralPath $folder.FullName -Recurse -Force
 }
-[ordered]@{keptLanguages=$keep;removed=$removed;removedBytes=($removed | Measure-Object bytes -Sum).Sum} | ConvertTo-Json -Depth 5 | Set-Content $Report -Encoding utf8
+$removedTotal=0L; foreach($item in $removed){$removedTotal+=$item.bytes}
+[ordered]@{keptLanguages=$keep;removed=$removed;removedBytes=$removedTotal} | ConvertTo-Json -Depth 5 | Set-Content $Report -Encoding utf8

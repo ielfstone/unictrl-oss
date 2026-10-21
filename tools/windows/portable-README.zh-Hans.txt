@@ -1,4 +1,4 @@
-Unictrl 0.7.1 — 双向文本和图片剪贴板（个人 Fork 测试版）
+Unictrl 0.7.2 界面预览 — 双向文本和图片剪贴板（个人 Fork 测试版）
 
 完整解压后运行 Unictrl.exe，保留全部 DLL 与子目录。旧版升级请先退出旧程序，把原来的 Data 文件夹复制到新软件目录，配对即可保留。
 
@@ -8,8 +8,8 @@ Mac 配对多台 PC 时，请在 Windows PC 下拉框选定一台；只有一台
 传输通过单独的加密局域网连接，不上传云端。暂停共享或断开连接会取消未完成的传输，键鼠连接独立。
 
 仅提供复制内容的同步，粘贴快捷键仍沿用你当前的键盘布局。目标应用必须允许粘贴文本。
-这是本地 Fork 的版本，不是原作者的官方发行。基于 GPL-3.0，完整许可证和修改源码随包提供。
-源代码：https://github.com/ielfstone/unictrl-oss/tree/fix/windows-green-tray
+这是本地 Fork 的版本，不是原作者的官方发行。基于 GPL-3.0，许可证随包提供，匹配源码独立提供，见 SOURCE.txt。
+源代码：https://github.com/ielfstone/unictrl-oss/tree/feature/windows-panel-preview
 
 自动更新：启动及每六小时检查此 fork 的稳定发布，后台验签、下载。完成后点 Restart and update，或从托盘菜单退出时自动替换并重启。Data 文件夹与配对保留，旧程序保存在同级 .previous 目录。可在 Software updates 中关闭自动检查。仅更新到本 fork 发布且验签成功的版本。
 

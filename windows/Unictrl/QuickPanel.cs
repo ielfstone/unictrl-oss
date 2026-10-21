@@ -118,7 +118,7 @@ internal sealed class QuickPanel : Window
     private void UpdateWheel(Button button, bool on)
     {
         var row = new Grid { ColumnSpacing = 7 }; Columns(row, GridLength.Auto, new(1, GridUnitType.Star));
-        row.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new(13), Background = on ? Pine : Surface(), Child = new FontIcon { Glyph = button == reverse ? "\uE8CB" : "\uE8CB", FontSize = 12, Foreground = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"] } });
+        row.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new(13), Background = on ? Pine : Surface(), Child = new FontIcon { Glyph = button == reverse ? "↕" : "≋", FontFamily = new FontFamily("Segoe UI"), FontSize = 14, Foreground = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"] } });
         var text = new StackPanel { Spacing = 1 }; text.Children.Add(Text((string)button.Tag, 11, true)); var state = Text(peer.Scroll is null ? "Connect / update Mac" : on ? "On" : "Off", 10); state.Opacity = .65; text.Children.Add(state); Grid.SetColumn(text, 1); row.Children.Add(text); button.Content = row;
         button.IsEnabled = peer.Connected && peer.Scroll is not null;
     }

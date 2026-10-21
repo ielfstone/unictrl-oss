@@ -41,6 +41,7 @@ internal static class PanelSelfTest
         try
         {
             var root = (FrameworkElement)panel!.Content; root.UpdateLayout();
+            await Save(root, "panel-connected.png");
             Check(root.ActualWidth is >= 340 and <= 362 && root.ActualHeight <= 682, "compact panel dimensions");
             var controls = Walk(root).ToArray();
             Check(controls.OfType<Border>().Any(b => b.AllowDrop), "drop target");
@@ -53,7 +54,6 @@ internal static class PanelSelfTest
             var tiles = panel.ScreenCanvas.Children.OfType<Border>().ToArray();
             Check(tiles.Length == 2 && Canvas.GetTop(tiles.Single(t => Equals(t.Tag, pc))) < Canvas.GetTop(tiles.Single(t => Equals(t.Tag, "mac"))), "Windows above Mac layout");
             AssertFooter(root);
-            await Save(root, "panel-connected.png");
             panel.Update(new("Files offered · choose where to save", "2 files · 640 MiB · presentation.zip, video.mp4"));
             panel.Show(); await Task.Delay(250); root.UpdateLayout();
             Check(Walk(root).OfType<Button>().Any(b => Equals(b.Content, "Receive & save…") && b.IsEnabled), "receive actionable");
