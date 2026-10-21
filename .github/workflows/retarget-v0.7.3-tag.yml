@@ -1,0 +1,70 @@
+name: Repair v0.7.3 release tag target
+
+on:
+  push:
+    branches: [fix/tray-native-frame]
+    paths:
+      - .github/workflows/retarget-v0.7.3-tag.yml
+
+permissions:
+  contents: write
+
+jobs:
+  retarget:
+    if: github.event.head_commit.message == 'Repair v0.7.3 release tag target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: a01e67aab703c0ac1ff9d0412cc3d2be309fa646
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/tray-native-frame
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Point v0.7.3 at the prepared release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "$TARGET_SHA^{commit}")" = "$TARGET_SHA"
+          git fetch origin --tags --force
+          git tag -f v0.7.3 "$TARGET_SHA"
+          git push --force origin refs/tags/v0.7.3
+          remote="$(git ls-remote --tags origin refs/tags/v0.7.3 | awk '{print $1}')"
+          test "$remote" = "$TARGET_SHA"
+
+      - name: Verify the Release and its six assets remain intact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api repos/ielfstone/unictrl-oss/git/ref/tags/v0.7.3 --jq .object.sha)"
+          asset_count="$(gh api repos/ielfstone/unictrl-oss/releases/tags/v0.7.3 --jq '.assets | length')"
+          release_state="$(gh api repos/ielfstone/unictrl-oss/releases/tags/v0.7.3 --jq .state)"
+          test "$tag_sha" = "$TARGET_SHA"
+          test "$asset_count" = "6"
+          test "$release_state" = "uploaded"
+
+  remove-helper:
+    needs: retarget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Remove one-time helper workflow
+        uses: actions/checkout@v4
+        with:
+          ref: fix/tray-native-frame
+          persist-credentials: true
+
+      - name: Commit helper removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/retarget-v0.7.3-tag.yml
+          git commit -m "Remove completed v0.7.3 tag repair workflow"
+          git push origin HEAD:fix/tray-native-frame
