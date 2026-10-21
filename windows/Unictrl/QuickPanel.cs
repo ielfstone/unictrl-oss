@@ -23,12 +23,12 @@ internal sealed class QuickPanel : Window
     private readonly Settings settings;
     private readonly QuickPanelActions actions;
     private readonly Grid root = new() { Padding = new Thickness(12), RowSpacing = 10 };
-    private readonly StackPanel body = new() { Spacing = 10 }, devices = new() { Spacing = 5 };
+    private readonly StackPanel body = new() { Spacing = 8 }, devices = new() { Spacing = 5 };
     private readonly ScrollViewer scroll;
-    private readonly Canvas screens = new() { Height = 94 };
+    private readonly Canvas screens = new() { Height = 64 };
     private readonly TextBlock connection = Text("Waiting for Mac", 11), status = Text("Files ready", 11), incoming = Text("", 11), notice = Text("", 11);
     private readonly ProgressBar progress = new() { Maximum = 100, Height = 3 };
-    private readonly Button receive = SmallButton("Receive to Downloads"), cancel = SmallButton("Cancel"), choose = SmallButton("Choose…");
+    private readonly Button receive = SmallButton("Receive to Downloads"), cancel = SmallButton("Cancel"), choose = SmallButton("Choose files…");
     private readonly Button enableFiles = SmallButton("Enable file sharing"), reverse, smooth;
     private readonly Border inbox, drop, notification;
     private readonly ToggleSwitch enabled;
@@ -71,19 +71,32 @@ internal sealed class QuickPanel : Window
         screens.SizeChanged += (_, _) => RenderScreens();
         body.Children.Add(devices);
 
-        var fileCard = new StackPanel { Spacing = 7 }; var fileHeading = new Grid(); Columns(fileHeading, new(1, GridUnitType.Star), GridLength.Auto);
-        fileHeading.Children.Add(Text("File transfer", 12, true)); Grid.SetColumn(cancel, 1); fileHeading.Children.Add(cancel); cancel.Click += (_, _) => files.Cancel(); fileCard.Children.Add(fileHeading);
+        var fileCard = new StackPanel { Spacing = 7 };
+        var fileHeading = new Grid { ColumnSpacing = 7 }; Columns(fileHeading, GridLength.Auto, new(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto);
+        fileHeading.Children.Add(new Border { Width = 15, Height = 15, BorderThickness = new(1), CornerRadius = new(2), BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray), Child = new FontIcon { Glyph = "\uE8CB", FontSize = 10 } });
+        var heading = Text("File transfer", 13, true); Grid.SetColumn(heading, 1); fileHeading.Children.Add(heading);
+        var info = new Button { Content = new FontIcon { Glyph = "\uE946", FontSize = 14 }, Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new(3), BorderThickness = new(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(info, "File transfer information");
+        var infoTip = new ToolTip { Content = Text("Copy/paste: up to 100 MiB per batch; files prepare automatically on the other computer.\n\nPanel transfer: up to 1 GiB per file, 4 GiB per batch, 32 regular files. Recipient accepts first; zip folders before sending.\n\nReceive saves to Downloads. Temporary clipboard files clear after 1 hour; history stores metadata only.", 11), MaxWidth = 290 };
+        ToolTipService.SetToolTip(info, infoTip); info.Click += (_, _) => infoTip.IsOpen = !infoTip.IsOpen;
+        Grid.SetColumn(info, 2); fileHeading.Children.Add(info); Grid.SetColumn(cancel, 3); fileHeading.Children.Add(cancel); cancel.Click += (_, _) => files.Cancel(); fileCard.Children.Add(fileHeading);
         enableFiles.Click += (_, _) => actions.EnableSharing(); fileCard.Children.Add(enableFiles);
-        var sendRow = new Grid { ColumnSpacing = 8 }; Columns(sendRow, GridLength.Auto, new(1, GridUnitType.Star), GridLength.Auto);
-        sendRow.Children.Add(new FontIcon { Glyph = "\uE898", FontSize = 22, Foreground = Pine, VerticalAlignment = VerticalAlignment.Center });
-        var sendText = new StackPanel { Spacing = 2 }; sendText.Children.Add(Text("Drop files to send", 12, true)); var hint = Text("Up to 1 GiB per file", 10); hint.Opacity = .65; sendText.Children.Add(hint); Grid.SetColumn(sendText, 1); sendRow.Children.Add(sendText);
-        Grid.SetColumn(choose, 2); sendRow.Children.Add(choose); choose.Click += Choose;
-        drop = Card(sendRow, 10); drop.AllowDrop = true; drop.DragOver += DragOver; drop.Drop += Drop; fileCard.Children.Add(drop);
+        var send = new StackPanel { Spacing = 5, Padding = new Thickness(10, 8, 10, 8) };
+        send.Children.Add(UploadGlyph());
+        var sendTitle = Text("Drop files to send", 12, true); sendTitle.HorizontalAlignment = HorizontalAlignment.Center; send.Children.Add(sendTitle);
+        choose.HorizontalAlignment = HorizontalAlignment.Center; choose.Click += Choose; send.Children.Add(choose);
+        var dropContent = new Grid();
+        dropContent.Children.Add(new Rectangle { RadiusX = 10, RadiusY = 10, Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(110, 128, 128, 128)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 4, 3 }, IsHitTestVisible = false });
+        dropContent.Children.Add(send);
+        drop = new Border { Child = dropContent, CornerRadius = new(10), Background = Surface(), AllowDrop = true };
+        drop.DragOver += DragOver; drop.Drop += Drop;
+        drop.DragEnter += (_, e) => { if (settings.ClipboardFilesEnabled && e.DataView.Contains(StandardDataFormats.StorageItems)) drop.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 22, 135, 99)); };
+        drop.DragLeave += (_, _) => drop.Background = Surface(); fileCard.Children.Add(drop);
         var incomingContent = new StackPanel { Spacing = 5 }; incomingContent.Children.Add(Text("Incoming files", 11, true)); incoming.MaxLines = 2; incoming.TextTrimming = TextTrimming.CharacterEllipsis; incomingContent.Children.Add(incoming);
         incomingContent.Children.Add(receive); receive.Click += Receive; inbox = Card(incomingContent, 8, true); fileCard.Children.Add(inbox);
         fileCard.Children.Add(progress); status.Opacity = .7; status.MaxLines = 2; status.TextTrimming = TextTrimming.CharacterEllipsis; fileCard.Children.Add(status);
-        var limits = Text("Copy/paste ≤100 MiB · cache clears after 1 hour", 10); limits.Opacity = .6; fileCard.Children.Add(limits);
-        notification = Card(notice, 8); fileCard.Children.Add(notification); body.Children.Add(fileCard);
+        notification = Card(notice, 8); fileCard.Children.Add(notification);
+        body.Children.Add(new Border { Child = fileCard, Padding = new(10), CornerRadius = new(12), Background = Surface() });
 
         var wheel = new Grid { ColumnSpacing = 8 }; Columns(wheel, new(1, GridUnitType.Star), new(1, GridUnitType.Star));
         reverse = WheelTile("Reverse Wheel", "\uE8CB", true); smooth = WheelTile("Smooth Scroll", "\uE8CB", false);
@@ -107,6 +120,23 @@ internal sealed class QuickPanel : Window
     private static Brush Surface() => new SolidColorBrush(Windows.UI.Color.FromArgb(13, 128, 128, 128));
     private static TextBlock SectionTitle(string text) { var title = Text(text, 11, true); title.Opacity = .65; return title; }
     private static Button SmallButton(string text) => new() { Content = text, FontSize = 11, MinHeight = 26, Padding = new Thickness(8, 3, 8, 3), HorizontalAlignment = HorizontalAlignment.Left };
+    private static Grid UploadGlyph()
+    {
+        var icon = new Grid { Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center };
+        foreach (var points in new PointCollection[] {
+            new() { new(14, 2), new(14, 19) },
+            new() { new(8, 8), new(14, 2), new(20, 8) },
+            new() { new(8, 13), new(3, 13), new(3, 27), new(25, 27), new(25, 13), new(20, 13) } })
+            icon.Children.Add(new Polyline { Points = points, Stroke = Pine, StrokeThickness = 1.8, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+        return icon;
+    }
+    private static string CompactFileStatus(string value)
+    {
+        if (value.StartsWith("Files ready to paste", StringComparison.Ordinal) || value.StartsWith("Ready for native paste", StringComparison.Ordinal)) return "Ready to paste";
+        if (value.StartsWith("Files ready ·", StringComparison.Ordinal)) return "Files ready";
+        if (value.StartsWith("Files offered ·", StringComparison.Ordinal)) return "Files offered";
+        return value;
+    }
     private static Border Card(UIElement child, double padding, bool tint = false) => new() { Child = child, Padding = new(padding), CornerRadius = new(9), BorderThickness = new(1), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 22, 135, 99)), Background = tint ? new SolidColorBrush(Windows.UI.Color.FromArgb(18, 22, 135, 99)) : Surface() };
     private Button MenuRow(string text, string glyph, Action action)
     {
@@ -176,7 +206,7 @@ internal sealed class QuickPanel : Window
     {
         enableFiles.Visibility = settings.ClipboardEnabled && settings.ClipboardFilesEnabled ? Visibility.Collapsed : Visibility.Visible;
         drop.Visibility = settings.ClipboardEnabled && settings.ClipboardFilesEnabled ? Visibility.Visible : Visibility.Collapsed;
-        status.Text = state.Status; incoming.Text = state.Incoming; notice.Text = state.Notice;
+        status.Text = CompactFileStatus(state.Status); incoming.Text = state.Incoming; notice.Text = state.Notice;
         notification.Visibility = state.Notice.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         inbox.Visibility = state.Incoming.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         progress.Visibility = cancel.Visibility = state.Busy ? Visibility.Visible : Visibility.Collapsed;
@@ -239,6 +269,7 @@ internal sealed class QuickPanel : Window
             files.Offer(items.Select(i => i.Path).ToArray());
         }
         catch (Exception error) { notice.Text = error.Message; notice.Visibility = Visibility.Visible; }
+        finally { drop.Background = Surface(); }
     }
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
 }

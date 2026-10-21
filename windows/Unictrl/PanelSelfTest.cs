@@ -45,6 +45,9 @@ internal static class PanelSelfTest
             Check(root.ActualWidth is >= 340 and <= 362 && root.ActualHeight <= 682, "compact panel dimensions");
             var controls = Walk(root).ToArray();
             Check(controls.OfType<Border>().Any(b => b.AllowDrop), "drop target");
+            var information = controls.OfType<Button>().Single(b => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(b) == "File transfer information");
+            Check(ToolTipService.GetToolTip(information) is ToolTip { Content: TextBlock help } && help.Text.Contains("100 MiB") && help.Text.Contains("1 GiB") && help.Text.Contains("1 hour"), "limits available as hover help");
+            Check(!controls.OfType<TextBlock>().Any(t => t.Text.Contains("cache clears after") || t.Text.Contains("recipient accepts first")), "instructions do not occupy panel space");
             Check(controls.OfType<TextBlock>().Any(t => t.Text.Contains("3 ms")), "connection latency");
             Check(controls.OfType<TextBlock>().Any(t => t.Text == "MacBook Pro") && controls.OfType<TextBlock>().Any(t => t.Text == "Windows PC"), "device rows");
             Check(controls.OfType<Button>().Any(b => Equals(b.Tag, "Reverse Wheel") && b.IsEnabled), "reverse wheel control");

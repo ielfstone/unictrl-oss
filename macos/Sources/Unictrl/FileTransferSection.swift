@@ -22,17 +22,20 @@ struct FileTransferCard: View {
             HStack {
                 Label("File transfer", systemImage: "arrow.up.arrow.down.square").font(.system(size: 13, weight: .semibold))
                 Spacer()
+                Image(systemName: "info.circle")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24).contentShape(Rectangle())
+                    .help("Copy/paste: up to 100 MiB per batch; files prepare automatically on the other computer.\n\nPanel transfer: up to 1 GiB per file, 4 GiB per batch, 32 regular files. Recipient accepts first; zip folders before sending.\n\nReceive saves to Downloads. Temporary clipboard files clear after 1 hour; history stores metadata only.")
+                    .accessibilityLabel("File transfer information")
                 if service.busy { Button("Cancel") { service.cancel() }.controlSize(.small) }
             }
             if !enabled {
-                Text("Send files to your paired computer").font(.caption).foregroundStyle(.secondary)
                 Button("Enable file sharing", action: enable)
             } else {
                 VStack(spacing: 5) {
                     Image(systemName: "tray.and.arrow.up").font(.title2).foregroundStyle(Color.pine)
                     Text("Drop files to send").font(.system(size: 12, weight: .medium))
                     Button("Choose files…") { chooseFiles() }.controlSize(.small).disabled(service.busy)
-                    Text("1 GiB/file · recipient accepts first").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity).padding(10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(hovering ? Color.pine.opacity(0.16) : Color.secondary.opacity(0.06)))
@@ -46,7 +49,7 @@ struct FileTransferCard: View {
                     }.padding(9).frame(maxWidth: .infinity, alignment: .leading).background(Color.pine.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
                 }
                 if service.busy { ProgressView(value: service.progress) }
-                Text(service.status).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(displayStatus).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !service.notice.isEmpty {
                     HStack(alignment: .top) {
                         Image(systemName: "info.circle.fill").foregroundStyle(.orange)
@@ -54,10 +57,16 @@ struct FileTransferCard: View {
                         Button { service.dismissNotice() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                     }.padding(8).background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 }
-                Text("Copy/paste ≤100 MiB · temporary cache clears after 1 hour").font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
         .padding(10).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+    }
+    private var displayStatus: String {
+        let value = service.status
+        if value.hasPrefix("Files ready to paste") || value.hasPrefix("Ready for native paste") { return "Ready to paste" }
+        if value.hasPrefix("Files ready ·") { return "Files ready" }
+        if value.hasPrefix("Files offered ·") { return "Files offered" }
+        return value
     }
     private func chooseFiles() {
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
