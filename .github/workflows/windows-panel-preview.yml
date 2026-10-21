@@ -33,6 +33,15 @@ jobs:
           $old = 84053040
           $new = (Get-Item artifacts/Unictrl-0.7.2-windows-x64-Setup.exe).Length
           [ordered]@{baselineInstallerBytes=$old;optimizedInstallerBytes=$new;savedBytes=$old-$new;savedPercent=[Math]::Round((1-$new/$old)*100,2)} | ConvertTo-Json | Set-Content artifacts/installer-size.json
+      - name: Record release asset metadata without downloading packages to the Mac
+        shell: pwsh
+        run: |
+          $assets = [ordered]@{}
+          foreach ($entry in @(@('windows','Unictrl-0.7.2-windows-x64-portable.zip'), @('windowsInstaller','Unictrl-0.7.2-windows-x64-Setup.exe'), @('source','Unictrl-0.7.2-Source.zip'))) {
+            $file = Get-Item (Join-Path artifacts $entry[1])
+            $assets[$entry[0]] = [ordered]@{name=$file.Name;size=$file.Length;sha256=(Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          }
+          [ordered]@{version='0.7.2';sourceCommit=$env:GITHUB_SHA;windowsRun=$env:GITHUB_RUN_ID;assets=$assets} | ConvertTo-Json -Depth 5 | Set-Content artifacts/release-package-metadata.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -41,12 +50,16 @@ jobs:
             artifacts/windows-tests/**
             artifacts/*size.json
             artifacts/language-pruning.json
+            artifacts/release-package-metadata.json
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: review-build-packages
+          name: Unictrl-0.7.2-windows-x64-portable
           path: |
             artifacts/Unictrl-0.7.2-windows-x64-Setup.exe
             artifacts/Unictrl-0.7.2-windows-x64-portable.zip
             artifacts/Unictrl-0.7.2-Source.zip
+            artifacts/Unictrl-0.7.2-windows-x64-Setup.exe.sha256
+            artifacts/Unictrl-0.7.2-windows-x64-portable.zip.sha256
+            artifacts/release-package-metadata.json
           if-no-files-found: error

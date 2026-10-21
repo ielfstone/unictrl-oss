@@ -99,7 +99,7 @@ Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path 
 $buildInfo = [ordered]@{
     version = '0.7.2'; sourceCommit = $env:GITHUB_SHA; architecture = 'x64'; baseCommit = 'db181b7e0ec03ed271dac5ed6df90b92c4d8b745'
     portable = $true; dotnetSelfContained = $true; windowsAppSDKSelfContained = $true
-    layoutVersion = 2; feature = 'unified tray panel preview with on-demand file transfers'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
+    layoutVersion = 2; feature = 'unified tray panel, native file paste and Receive to Downloads'; windowsTests = 'passed'; runtimeSmokeTest = 'passed'; clipboardNativeIntegration = 'passed'; updateIntegration = 'passed'; compiledAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $buildInfo | ConvertTo-Json | Set-Content (Join-Path $payload 'BUILD-INFO.json') -Encoding utf8
 $zip = Join-Path $out ($packageName + '.zip')

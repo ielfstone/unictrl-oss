@@ -39,6 +39,11 @@ jobs:
             $file = if ($platform -in @('macos','macosDmg')) { Join-Path distribution $name } else { Join-Path distribution/windows $name }
             if ((Get-Item -LiteralPath $file).Length -ne $asset.size -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asset.sha256) { throw "Invalid $platform package." }
           }
+          $source = $config.sourceArchive
+          if ($source) {
+            $file = Join-Path distribution/windows $source.name
+            if ((Get-Item $file).Length -ne $source.size -or (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $source.sha256) { throw 'Invalid source archive.' }
+          }
       - name: Publish complete signed release
         shell: pwsh
         env:
@@ -49,9 +54,13 @@ jobs:
           $tag = 'v' + $config.version
           gh release view $tag --repo ielfstone/unictrl-oss 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; preserve the published version.' }
-          gh release create $tag --repo ielfstone/unictrl-oss --target $config.sourceCommit --draft --title "Unictrl $($config.version) · 文件传输与自动更新" --notes-file distribution/NOTES.zh-Hans.md
+          gh release create $tag --repo ielfstone/unictrl-oss --target $config.sourceCommit --draft --title "Unictrl $($config.version) · 托盘界面与原生文件粘贴" --notes-file distribution/NOTES.zh-Hans.md
           if ($LASTEXITCODE -ne 0) { throw 'Cannot create draft release.' }
           gh release upload $tag --repo ielfstone/unictrl-oss distribution/update-v1.json "distribution/Unictrl-$($config.version)-macOS-universal-update.zip" "distribution/Unictrl-$($config.version)-macOS-universal.dmg" "distribution/windows/Unictrl-$($config.version)-windows-x64-portable.zip" "distribution/windows/Unictrl-$($config.version)-windows-x64-Setup.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; draft remains unpublished.' }
+          if ($config.sourceArchive) {
+            gh release upload $tag --repo ielfstone/unictrl-oss (Join-Path distribution/windows $config.sourceArchive.name)
+            if ($LASTEXITCODE -ne 0) { throw 'Source archive upload failed; draft remains unpublished.' }
+          }
           gh release edit $tag --repo ielfstone/unictrl-oss --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Cannot publish the completed release.' }
